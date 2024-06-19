@@ -1,0 +1,8 @@
+ansible_connection: winrm
+ansible_winrm_transport: ntlm
+ansible_winrm_server_cert_validation: "ignore"
+ansible_shell_executable: "None"
+ansible_shell_type: "powershell"
+ansible_become_method: "runas"
+ansible_winrm_operation_timeout_sec: 3600
+ansible_winrm_read_timeout_sec: 7200

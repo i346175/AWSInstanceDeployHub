@@ -1,0 +1,563 @@
+
+AWSTemplateFormatVersion: 2010-09-09
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >
+  rds-mysql DB Infrastructure CloudFormation Template
+Parameters:
+  Action:
+    Description: "Decides if template should be deployed with CloudFormation or just stored to S3 Bucket"
+    Type: String
+    AllowedValues: 
+      - Deploy
+      - S3Bucket
+      - ScheduleDeploy
+      - ScheduleDeployTest
+      
+  Account:
+    Description: "Current account"
+    Type: String
+    AllowedValues:
+      - integration-tools
+      - us2-tools
+      - eu2-tools
+      - uspscc-tools
+      - apj1-tools
+  BucketName:
+    Description: "Name of the S3 bucket to utility"
+    Type: String
+  DBAllocatedStorage:
+    Default: '200'
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: '200'
+    MaxValue: '1000'
+    ConstraintDescription: Must be between 200-1000GB
+  DBMaxAllocatedStorage:
+    Default: '1000'
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: '300'
+    MaxValue: '2000'
+    ConstraintDescription: Must be between 200-1000GB
+
+  DBInstanceClass:
+    Description: The database instance type
+    Type: String
+    Default: db.r6g.large
+    AllowedValues: [db.r6g.large, db.r6g.2xlarge, db.r7g.2xlarge, db.r7g.xlarge, db.m7g.2xlarge]
+  DBInstanceIdentifier:
+    Description: Name for the DB instance
+    Type: String
+  ChangeRecordID:
+    Description: Github Commit Hash
+    Type: String
+    Default: No Hash
+  CPUUtilizationAlarmEvaluationPeriod:
+    Description: The number of minutes the metric has to cross the threshold for in order for the alarm to activate.
+    Type: Number
+    MinValue: '15'
+    Default: '120'
+  DatabaseConnectionsAlarmEvaluationPeriod:
+    Description: The number of minutes the metric has to cross the threshold for in order for the alarm to activate.
+    Type: Number
+    MinValue: '15'
+    Default: '15'
+  FreeStorageSpaceAlarmEvaluationPeriod:
+    Description: The number of minutes the metric has to cross the threshold for in order for the alarm to activate.
+    Type: Number
+    MinValue: '5'
+    Default: '15'
+  CPUUtilizationAlarmThreshold:
+    Description: The CPU utilization percentage that has to be crossed in order for the alarm to activate.
+    Type: Number
+    Default: '98'
+  DatabaseConnectionsAlarmThreshold:
+    Description: The percentage of DB connections used that has to be crossed in order for the alarm to activate.
+    Type: Number
+    Default: '1400'
+  FreeStorageSpaceAlarmThreshold:
+    Description: Percentage of free storage. If there is less storage available than this amount then the alarm will activate.
+    Type: Number
+    Default: '5'
+    
+Resources:
+  SeedPassword:
+    # Every Stack redeployment run should remove this resource and create another one according
+    # to the resource Name and the CreateSecretManager condition.
+    # The secret is rotated by changing its name on every deployment.
+    # This is preferred over using the RotationSchedule which would need to be bent
+    # to delete the secret instead of rotating it.
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Description: "The secret has a dynamically generated seed password for the master DB instance"
+      # Use a dynamic name to ensure the secret is replaced on every deployment.
+      # Using the ChangeRecordID means the secret won't be replaced if the same template is redeployed.
+      Name: !Join [ '', [ 'SeedPassword_', !Ref ChangeRecordID ] ]
+      GenerateSecretString:
+        ExcludePunctuation: true
+        IncludeSpace: false
+        ExcludeLowercase: true
+        ExcludeUppercase: false
+        ExcludeNumbers: false
+        PasswordLength: 16
+        GenerateStringKey: "password"
+        SecretStringTemplate: '{"username":"solw_app"}'
+      Tags:
+        - Key: RoleType
+          Value: solw
+  SeedSecretResourcePolicy:
+    # This policy allows the vault configurer lambda function to access the seed password in the Secret Manager.
+    Type: "AWS::SecretsManager::ResourcePolicy"
+    Properties:
+      BlockPublicPolicy: true
+      SecretId:
+        Ref: "SeedPassword"
+      ResourcePolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "DenySecretManagerActionsExceptForDeployerRoleAndStackVaultIAMRole"
+            Resource: "*"
+            Action: "*"
+            Effect: "Deny"
+            Principal: "*"
+            Condition:
+              StringNotLike:
+                'aws:PrincipalArn':   # Mandatory: Allow you to manage the secret in the future
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/DbOpsRole"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/AdministratorRole"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/SolwOpsRole"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/service-role/deployer-impact-AWSInstanceDeployHub-role"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/SolwVaultRole"
+          - Sid: "AllowAccessRightsForVaultIAMRole"
+            Resource: "*"
+            Action:
+              - "secretsmanager:GetSecretValue"
+            Effect: "Allow"
+            Principal:
+              AWS:   # Avoid "AccessDeniedException" when calling the GetSecretValue operation
+                - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/SolwVaultRole"
+
+  RDSParamGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: MySQL8.0
+      Description: CloudFormation DB Parameter Group
+      Parameters:
+        log_bin_trust_function_creators: '1'
+        tls_version: "TLSv1.2"
+        max_connections: "1500"
+        # RDS log enablement: https://aws.amazon.com/premiumsupport/knowledge-center/rds-mysql-logs/
+        # Log rotation and retention for RDS for MySQL:
+        # https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_LogAccess.MySQL.LogFileSize.html#USER_LogAccess.MySQL.LogFileSize.retention
+        general_log: "0"                    # Logs all queries when enabled (0/1)
+        log_output: "FILE"                  # Log output (FILE/TABLE)
+
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: CloudFormation managed DB subnet group.
+      SubnetIds:
+        - !ImportValue DbSubnet1Id
+        - !ImportValue DbSubnet2Id
+        - !ImportValue DbSubnet3Id
+
+  MonitoringRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      ManagedPolicyArns:
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 'monitoring.rds.amazonaws.com'
+            Action:
+              - 'sts:AssumeRole'
+  # Filters the metrics published in the system OS metrics log group
+  # to produce a "total memory" metric that will be leveraged in alarms below
+  TotalMemoryFilter:
+    Type: AWS::Logs::MetricFilter
+    # When deploying this stack for the first time, the RDSOSMetrics Log Group might not yet exist as it is created
+    # by AWS when an RDS instance is configured with enhanced monitoring.
+    # To avoid a race condition, make sure the filter is deployed after the main instance.
+    DependsOn: MasterDB
+    Properties:
+      FilterPattern: !Sub
+        - "{ $.instanceID = ${InstanceID} }"
+        - { InstanceID: !Join ['-', [!Ref DBInstanceIdentifier, mysql, master]] }
+      LogGroupName: RDSOSMetrics
+      MetricTransformations:
+        - MetricName: TotalMemory
+          MetricNamespace: RDSOSMetrics
+          MetricValue: $.memory.total
+  MasterDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: !Ref DBAllocatedStorage
+      MaxAllocatedStorage: !Ref DBMaxAllocatedStorage
+
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: true
+      CopyTagsToSnapshot: true
+      DBInstanceClass: !Ref DBInstanceClass
+      DBInstanceIdentifier:
+        !Join ['-', [!Ref DBInstanceIdentifier, mysql, master]]
+      DBParameterGroupName: !Ref RDSParamGroup
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      DBName: solw
+      DeleteAutomatedBackups: false
+      DeletionProtection: true
+      Engine: MySQL
+      EngineVersion: '8.0.36'
+
+      MasterUsername: solw_app
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref SeedPassword, ':SecretString:password}}' ]]
+      MonitoringInterval: 60
+      MonitoringRoleArn: !GetAtt ["MonitoringRole", "Arn"]
+      MultiAZ: true
+      Port: 3306
+      PreferredMaintenanceWindow: 'sat:05:00-sat:08:00'
+      StorageEncrypted: true
+      StorageType: gp3
+      #add autoscaling enabled, of storage
+
+      EnableCloudwatchLogsExports: [error, general]
+      VPCSecurityGroups:
+        - !ImportValue DbSgId
+        - !ImportValue VaultSGId
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 0
+      Tags:
+        - Key: RoleType
+          Value: solw
+        - Key: ChangeRecordID
+          Value: !Ref ChangeRecordID
+  VaultSecretLoaderFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      CodeUri:
+        Bucket: !Ref BucketName
+        Key: "AWSInstanceDeployHub/scripts/Solarwinds/utilities/uploader-al2-2.0.4.zip"
+      Description: Function to load secrets to vault
+      Environment:
+        Variables:
+          VAULT_ADDR: 'https://vault.service.cnqr.tech:443'
+          VAULT_SKIP_VERIFY: '0'
+      Handler: bootstrap
+      MemorySize: 128
+      Role: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/SolwVaultRole"
+      Runtime: provided.al2
+      Timeout: 60   # Allow a high timeout for vault calls to avoid timeout or DNS issues
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue DefaultSecurityGroupId
+        SubnetIds:
+          - !ImportValue ConcurIntSubnet1Id
+          - !ImportValue ConcurIntSubnet2Id
+          - !ImportValue ConcurIntSubnet3Id
+      Tags:
+        RoleType: solw
+  VaultSecretLoaderFunctionTrigger:
+    Type: 'AWS::CloudFormation::CustomResource'
+    Version: '1.0'
+    Properties:
+      RetentionPolicy: Retain
+      Namespace: tools/solw
+      Path: secret/solw #Example: secret/myservice/db
+      Role: solwRole # The role that will be used to write the secret to vault and must be defined in Vault
+      Secrets:
+        db.url: !Join [
+          '',
+          [
+            'jdbc:mysql://',
+            !GetAtt [ MasterDB, Endpoint.Address ],
+            ':',
+            !GetAtt [ MasterDB, Endpoint.Port ],
+            /,
+            'solw',
+          ],
+        ]
+      ServiceToken: !GetAtt
+        - VaultSecretLoaderFunction
+        - Arn
+      Tags:
+        - Key: ChangeRecordID
+          Value: !Ref ChangeRecordID
+        - Key: RoleType
+          Value: solw
+  SecretsManagerBasedVaultDatabaseConfigurer:
+    Type: "AWS::Serverless::Function"
+    DependsOn: "MasterDB"
+    Properties:
+      Description: "Function to configure the database in vault and to make the password rotation."
+      CodeUri:
+        Bucket: !Ref BucketName
+        Key: "AWSInstanceDeployHub/scripts/Solarwinds/utilities/configurer-al2-2.0.4.zip"
+      Handler: bootstrap
+      MemorySize: 128
+      Runtime: provided.al2
+      Environment:
+        Variables:
+          CALLER_TYPE: 'lambda'
+          VAULT_ADDR: 'https://vault.service.cnqr.tech:443'
+          VAULT_SKIP_VERIFY: "0"
+      Role: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/SolwVaultRole"
+      Timeout: 120     # Allow a high timeout for vault calls to avoid timeout or DNS issues
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue DefaultSecurityGroupId
+        SubnetIds:
+          - !ImportValue ConcurIntSubnet1Id
+          - !ImportValue ConcurIntSubnet2Id
+          - !ImportValue ConcurIntSubnet3Id
+      Tags:
+        RoleType: solw
+  DatabaseConfigurerLambdaPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !GetAtt SecretsManagerBasedVaultDatabaseConfigurer.Arn
+      Action: "lambda:InvokeFunction"
+      Principal: "lambda.amazonaws.com"
+      SourceArn: !GetAtt SecretProvider.Arn
+  SecretProvider:
+    Type: "AWS::Lambda::Function"
+    DependsOn: "MasterDB"
+    Properties:
+      Description: "Function to retrieve the secret and launch the password rotation via the SecretsManagerBasedVaultDatabaseConfigurer function"
+      Environment:
+        Variables:
+          SECRETS_MANAGER_ENDPOINT: !Sub 'https://secretsmanager.${AWS::Region}.amazonaws.com'
+          REGION_NAME: !Sub '${AWS::Region}'
+          DATABASE_CONFIGURER_FUNCTION: !GetAtt SecretsManagerBasedVaultDatabaseConfigurer.Arn
+          SECRET_ID: !Ref SeedPassword
+      Code:
+        ZipFile: |
+          import boto3
+          import json
+          import os
+          import cfnresponse
+          import base64
+
+          def handler(event, context):
+
+            print("Start of SecretProvider Lambda Function: ", str(context.invoked_function_arn))
+            print("Custom Resource Context: ",vars(context))
+            responseFromCfnVaultUtils = "Nothing to do"
+
+            if 'RequestType' in event:
+              print("Request type: ", event['RequestType'])
+
+              if event['RequestType'] == 'Delete':
+                responseFromCfnVaultUtils = responseFromCfnVaultUtils + ", " + event['RequestType'] + " request has been requested from CFN."
+                print(responseFromCfnVaultUtils)
+
+              if event['RequestType'] == 'Update' or event['RequestType'] == 'Create':
+
+                print("Get the 'AWSCURRENT' Secret")
+                service_client = boto3.client('secretsmanager', endpoint_url=os.environ['SECRETS_MANAGER_ENDPOINT'])
+                secret = service_client.get_secret_value(SecretId=os.environ['SECRET_ID'], VersionStage="AWSCURRENT")
+                plaintextSecret=secret['SecretString']
+                secret_dict = json.loads(plaintextSecret)
+
+                # Forward the event inputs from the CustomResource/Trigger
+                RequestId = event['RequestId'] if 'RequestId' in event else "None"
+                ResponseURL = event['ResponseURL'] if 'ResponseURL' in event else "None"
+                PhysicalResourceId = event['PhysicalResourceId'] if 'PhysicalResourceId' in event else "None"
+                StackId = event['StackId'] if 'StackId' in event else "None"
+
+                if 'ResourceProperties' in event:
+
+                  # Prepare the input data for the Configurer Lambda function
+                  dict_ResourceProperties = json.dumps(event['ResourceProperties'])
+                  print("Found Resource Properties: ", dict_ResourceProperties)
+
+                  inputParams = {
+                    "RequestType": event['RequestType'],
+                    "RequestID": RequestId,
+                    "ResponseURL": ResponseURL,
+                    "ResourceType": "AWS::Lambda::Function",
+                    "PhysicalResourceID": PhysicalResourceId,
+                    "LogicalResourceID": "SecretProviderID",
+                    "StackID": StackId,
+                    "ResourceProperties": {
+                      "Role": event['ResourceProperties'].get('Role'),
+                      "Namespace": event['ResourceProperties'].get('Namespace'),
+                      "DatabasePlugin": event['ResourceProperties'].get('DatabasePlugin'),
+                      "DatabasePath": event['ResourceProperties'].get('DatabasePath'),
+                      "AllowedRoles": event['ResourceProperties'].get('AllowedRoles'),
+                      "Username": event['ResourceProperties'].get('Username'),
+                      "Password": secret_dict['password'],
+                      "Url": event['ResourceProperties'].get('Url'),
+                      "Port": event['ResourceProperties'].get('Port')
+                    }
+                  }
+
+                  # Prepare the context for the Configurer Lambda function
+                  ctx = {
+                    "Custom": {
+                      "LambdaRequest": "true",
+                      "RequestType": event['RequestType'],
+                      "ResourceType": "AWS::Lambda::Function"
+                      },
+                    "Env": {},
+                    "Client": {}
+                  }
+                  lambdaClientCtx = lambda_context(**ctx)
+
+                  # Launch the Configurer Lambda function
+                  print("Running the", os.environ['DATABASE_CONFIGURER_FUNCTION'], "Lambda function.")
+                  lambda_inv = boto3.client("lambda",  region_name=os.environ['REGION_NAME'])
+                  response = lambda_inv.invoke(FunctionName=os.environ['DATABASE_CONFIGURER_FUNCTION'],
+                                                InvocationType='RequestResponse',
+                                                ClientContext=lambdaClientCtx,
+                                                Payload=json.dumps(inputParams))
+                  responseFromCfnVaultUtils = json.load(response['Payload'])
+                  print("Response from ", os.environ['DATABASE_CONFIGURER_FUNCTION'], " = ", responseFromCfnVaultUtils)
+                else:
+                  print("Cannot find the Resource Properties")
+            else:
+              responseFromCfnVaultUtils = responseFromCfnVaultUtils + ", RequestType is missing."
+              print(responseFromCfnVaultUtils)
+
+            # Manage the response according a CI/CD run or a manually test
+            if 'ResponseURL' in event:
+              responseData = {}
+              responseData['Data'] = responseFromCfnVaultUtils
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData)
+            else:
+              print("End of manually attempt.")
+
+          # Prepare the context for a Lambda function
+          def lambda_context(Custom=None, Env=None, Client=None):
+            client_context = dict(Custom=Custom, Env=Env, Client=Client)
+            json_context = json.dumps(client_context).encode('utf-8')
+            return base64.b64encode(json_context).decode('utf-8')
+      Handler: "index.handler"
+      Runtime: "python3.10"
+      Timeout: 35
+      Role: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/SolwVaultRole"
+      VpcConfig:
+        SecurityGroupIds:
+          - !ImportValue DefaultSecurityGroupId
+        SubnetIds:
+          - !ImportValue ConcurIntSubnet1Id
+          - !ImportValue ConcurIntSubnet2Id
+          - !ImportValue ConcurIntSubnet3Id
+      Tags:
+        - Key: RoleType
+          Value: solw
+  SecretProviderTrigger:
+    Type: "AWS::CloudFormation::CustomResource"
+    Version: "1.0"
+    Properties:
+      ServiceToken: !GetAtt SecretProvider.Arn
+      Role: solwRole
+      Namespace: tools/solw
+      DatabasePlugin: "mysql-rds-database-plugin"
+      DatabasePath: solw
+      AllowedRoles: "admin,readwrite,readonly"
+      Username: solw_app
+      Url: !GetAtt
+        - MasterDB
+        - Endpoint.Address
+      Port: 3306
+      Tags:
+        - Key: ChangeRecordID
+          Value: !Ref ChangeRecordID
+        - Key: RoleType
+          Value: solw
+  CPUUtilizationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions: 
+              - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:IOPS-DB-PagerDuty'
+      AlarmDescription: CloudWatch alarm that alerts when CPU usage is too high.
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: !Ref CPUUtilizationAlarmEvaluationPeriod
+      InsufficientDataActions:
+              - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:IOPS-DB-PagerDuty'
+      MetricName: CPUUtilization
+      Namespace: AWS/RDS
+      Dimensions:
+        - Name: DBInstanceIdentifier
+          Value: !Join ['-', [!Ref DBInstanceIdentifier, mysql, master]]
+      Statistic: Average
+      Period: 60
+      Threshold: !Ref CPUUtilizationAlarmThreshold
+      Unit: Percent
+  DatabaseConnectionsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions: 
+                  - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:IOPS-DB-PagerDuty'
+      AlarmDescription: CloudWatch alarm that alerts when the number of concurrent connections is too high.
+      ComparisonOperator: GreaterThanThreshold
+      EvaluationPeriods: !Ref DatabaseConnectionsAlarmEvaluationPeriod
+      InsufficientDataActions: 
+                  - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:IOPS-DB-PagerDuty
+      Metrics:
+        - Id: e
+          Expression: !Sub (c / 1500) * 100
+          Label: Percentage of maximum DB connections
+        - Id: c
+          MetricStat:
+            Metric:
+              Namespace: AWS/RDS
+              MetricName: DatabaseConnections
+              Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value: !Join ['-', [!Ref DBInstanceIdentifier, mysql, master]]
+            Period: 60
+            Stat: Average
+            Unit: Count
+          ReturnData: false
+      Threshold: !Ref DatabaseConnectionsAlarmThreshold
+  FreeStorageSpaceAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmActions:
+            -  !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:IOPS-DB-PagerDuty'
+      AlarmDescription: CloudWatch alarm that alerts when the amount of free storage is too low.
+      ComparisonOperator: LessThanThreshold
+      EvaluationPeriods: !Ref FreeStorageSpaceAlarmEvaluationPeriod
+      InsufficientDataActions: 
+                  - !Sub 'arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:IOPS-DB-PagerDuty'
+      Metrics:
+        - Id: e
+          Expression: !Sub (s / (${DBAllocatedStorage} * 1073741824)) * 100
+          Label: Percentage of allocated storage used.
+        - Id: s
+          MetricStat:
+            Metric:
+              Namespace: AWS/RDS
+              MetricName: FreeStorageSpace
+              Dimensions:
+                - Name: DBInstanceIdentifier
+                  Value: !Join ['-', [!Ref DBInstanceIdentifier, mysql, master]]
+            Period: 60
+            Stat: Average
+            Unit: Bytes
+          ReturnData: false
+      Threshold: !Ref FreeStorageSpaceAlarmThreshold
+Outputs:
+  DBEndpointAddress:
+    Description: Address of database endpoint
+    Value: !GetAtt [MasterDB, Endpoint.Address]
+    Export:
+      Name: !Join ['-', [!Ref 'AWS::StackName', db, master, url]]
+  MasterDBConnectionString:
+    Description: JDBC connection string for the master database
+    Value:
+      !Join [
+        '',
+        [
+          !GetAtt [MasterDB, Endpoint.Address],
+          ':',
+          !GetAtt [MasterDB, Endpoint.Port],
+          /,
+          "solw",
+        ],
+      ]
+    Export:
+      Name: !Join ['-', [!Ref 'AWS::StackName', db, master, connectionstring]]

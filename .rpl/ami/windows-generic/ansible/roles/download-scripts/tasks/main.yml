@@ -1,0 +1,8 @@
+- name: Run basic PowerShell script
+  ansible.windows.win_powershell:
+    script: |
+      $env:https_proxy=''
+      New-Item -ItemType "directory" -Path "C:\mssql-scripts\" | Out-Null
+      aws s3 cp s3://mssql-2019-ent-rtm/TunableSSLValidator.zip C:\mssql-scripts\TunableSSLValidator.zip --no-progress
+      Expand-Archive -Path C:\mssql-scripts\TunableSSLValidator.zip -DestinationPath C:\mssql-scripts\
+      Remove-Item -Path C:\mssql-scripts\TunableSSLValidator.zip -Force

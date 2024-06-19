@@ -1,0 +1,15 @@
+integrations:
+  - name: nri-flex # We're telling the Infra agent to run Flex
+    interval: 3600s
+    timeout: 60s
+    config: # Flex configuration starts here!
+      name: CheckGatewayRoutes
+      apis:
+        - name: CheckGatewayRoute
+          shell: powershell
+          commands:
+            - run: powershell -ExecutionPolicy Bypass "& "D:\PowershellScripts\CheckGatewayRoutes.ps1""
+              split: horizontal
+              split_by: \s+
+              set_header: [StatusCode,StatusDesc]
+              timeout: 300000

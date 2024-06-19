@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS S3 Bucket for RPL storage functionalities.
+ 
+Parameters:
+  Name:
+    Description: "Name for S3 bucket that is to be created."
+    Type: String
+Resources:
+  MSSQLS3Bucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Ref 'Name'
+      LifecycleConfiguration:
+        Rules:
+          - Id: Cleaning-lambda
+            Prefix: lambda/
+            Status: Enabled
+            ExpirationInDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+          - Id: Cleaning-layer
+            Prefix: layers/
+            Status: Enabled
+            ExpirationInDays: 1
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      Tags:
+        - Key: Owner
+          Value: iops-db@sap.com
+        - Key: RoleType
+          Value: dbsql 
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  MyBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+       Bucket: !Ref 'MSSQLS3Bucket'
+       PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Sid: AllowSpecifiedRoles
+          Effect: Allow
+          Principal: "*"
+          Action: "s3:*"
+          Resource:
+            - !Join ["", ["arn:", !Ref 'AWS::Partition', ":s3:::", !Ref 'MSSQLS3Bucket', "/*"]]
+            - !Join ["", ["arn:", !Ref 'AWS::Partition', ":s3:::", !Ref 'MSSQLS3Bucket']]
+          Condition:
+            StringLike:
+              aws:PrincipalArn:
+                - !Sub 'arn:${AWS::Partition}:iam::*:role/DbOpsRole'
+                - !Sub 'arn:${AWS::Partition}:iam::*:role/DCP-Runtime-Role'
+                - !Sub 'arn:${AWS::Partition}:iam::*:role/MSSQLOpsRole'
+                - !Sub 'arn:${AWS::Partition}:iam::*:role/AdministratorRole'
+                - !Sub 'arn:${AWS::Partition}:iam::*:role/SolwOpsRole'
+                - !Sub 'arn:${AWS::Partition}:iam::*:role/service-role/deployer-impact-*'
+                - !Sub 'arn:${AWS::Partition}:iam::*:role/rpl-runner-impact-*'
+            ForAnyValue:StringEquals: 
+                    aws:PrincipalOrgID:
+                      - o-zttc0rq0c8
+                      - o-x8tkpmx1de
+                      - o-kxa2b78ivs
+                      - o-t2i0u1nexi
+            Bool:
+              aws:SecureTransport: "true"
+Outputs: 
+  MSSQLS3Bucket: 
+    Description: "MSSQLS3Bucket"
+    Value: !Ref "MSSQLS3Bucket"

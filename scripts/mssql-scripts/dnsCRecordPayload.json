@@ -1,0 +1,11 @@
+{
+    "Comment": "CREATE CNAME record ",
+    "Changes": [{
+        "Action": "CREATE",
+        "ResourceRecordSet": {
+            "Name": "cnameShort",
+            "Type": "CNAME",
+            "TTL": 300,
+            "ResourceRecords": [{"Value": "hostfqdn"}]
+        }}]
+}

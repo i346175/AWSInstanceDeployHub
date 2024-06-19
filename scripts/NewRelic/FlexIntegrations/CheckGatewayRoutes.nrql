@@ -1,0 +1,1 @@
+FROM CheckGatewayRouteSample SELECT latest(StatusCode) WHERE label.RoleType = 'dbsql' and label.ConfigType = 'PRODUCTION' FACET label.HostName

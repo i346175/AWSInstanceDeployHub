@@ -1,0 +1,7 @@
+---
+- hosts: all
+  roles:
+    - proxy-env-vars
+    - init
+    - download-scripts
+    - clean

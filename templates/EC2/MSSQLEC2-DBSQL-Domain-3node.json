@@ -1,0 +1,1358 @@
+{
+  
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Domain-backed 3-Node Cluster FIPS (SQL Server 2019) One-Touch version 1.6",
+  "Parameters": {
+    "Environment" : {
+      "Type" : "String",
+      "AllowedValues" : ["USPSCC", "INTEGRATION", "EU2", "US2", "APJ1"],
+      "Description" : "Select Environment from the the list"      
+    },
+    "RoleType": {
+      "Type": "String",
+      "Default" : "dbsql",
+      "AllowedPattern" : ".+"
+    },
+    "InstanceType" : {
+      "Type" : "String",
+      "AllowedValues" : ["r5.xlarge", "r5.2xlarge", "r5.4xlarge", "r5.12xlarge", "r5.16xlarge", "r5b.2xlarge", "r5b.4xlarge", "r5b.8xlarge", "r5b.12xlarge", "r5b.16xlarge", "r6i.xlarge", "r6i.2xlarge", "r6i.12xlarge", "r6id.xlarge", "r6id.2xlarge", "r6id.4xlarge", "r6id.8xlarge", "r6id.12xlarge", "r6id.16xlarge", "x2iedn.xlarge", "x2iedn.2xlarge", "x2iedn.4xlarge", "x2iedn.8xlarge", "x2iedn.16xlarge", "x2iedn.32xlarge", "x2iezn.2xlarge"],
+      "Description" : "Enter Instance Type"
+    },
+    "DiskSizeOfDDrive": {
+      "Type": "Number",
+      "Default" : 100,
+      "MinValue" : 100,
+      "MaxValue" : 2000,
+      "ConstraintDescription": "Must be between a numeric value in gigabytes [between 100 to 2000]",
+      "Description": "Disk size for D: drive."
+    },
+    "DiskSizeOfEDrive": {
+      "Type": "Number",
+      "MinValue" : 100,
+      "MaxValue" : 2000,
+      "ConstraintDescription": "Must be between a numeric value in gigabytes [between 100 to 2000]",
+      "Description": "Disk size for E: drive."
+    },
+    "DiskSizeOfFDrive": {
+      "Type": "Number",
+      "MinValue" : 100,
+      "MaxValue" : 2000,
+      "ConstraintDescription": "Must be between a numeric value in gigabytes [between 100 to 2000]",
+      "Description": "Disk size for F: drive. This value will be ignored if the instance has a local instance storage (NVMe volume)"
+    },
+    "DiskSizeOfGDrive": {
+      "Type": "Number",
+      "MinValue" : 100,
+      "MaxValue" : 2000,
+      "ConstraintDescription": "Must be between a numeric value in gigabytes [between 100 to 2000]",
+      "Description": "Disk size for G: drive."
+    },
+    "DiskSizeOfMDrive": {
+      "Type": "Number",
+      "MinValue" : 100,
+      "MaxValue" : 2000,
+      "ConstraintDescription": "Must be between a numeric value in gigabytes [between 100 to 2000]",
+      "Description": "Disk size for M: drive."
+    },
+    "NameOfCRecordForListener": {
+      "Type": "String",
+      "AllowedPattern" : ".+",
+      "Description" : "CName for the SQL Listener WITHOUT the FQDN"
+    },
+    "NameOfCRecordsAdditional": {
+      "Type": "String",
+      "AllowedPattern" : ".+",
+      "Default" : "none",
+      "Description" : "Additional CNames to be part of Certs (Seperate each with a ','). Leave it 'none' if no additional CNames are required"
+    },
+    "SQLVersion" : {
+      "Type" : "String",
+      "AllowedValues" : [ "SQL2019", "SQL2019_Dev", "SQL2019_Std", "SQL2022", "SQL2022_Dev", "SQL2022_Std" ],
+      "Default" : "SQL2019",
+      "Description" : "Select the SQL Version to install from the list"
+    },
+    "ConfigType" : {
+      "Type" : "String",
+      "AllowedValues" : [ "PRODUCTION","TESTING-ALL","TESTING-NO-MONITORING","TESTING-DEPLOYMENT"],
+      "Default" : "PRODUCTION",
+      "Description" : "Select the configuration type for your build from the list"
+    },
+    "Action": {
+      "Description": "Decides if template should be deployed with CloudFormation or just stored at S3 Bucket",
+      "Type": "String",
+      "Default": "Deploy",
+      "AllowedValues": ["S3Bucket","Deploy","ScheduleDeploy","ScheduleDeployTest"]
+    },
+    "Account": {
+      "Description": "Current account",
+      "Type": "String",
+      "Default": "default-account",
+      "AllowedValues": ["default-account","integration-tools","integration-travel","integration-spend","integration-report","integration-front","us2-tools","us2-travel","us2-spend","us2-report","us2-front","us2-reportmigration","eu2-reportmigration","eu2-tools","eu2-travel","eu2-spend","eu2-report","eu2-front","uspscc-tools","uspscc-travel","uspscc-spend","uspscc-report","uspscc-front","apj1-report", "apj1-spend", "apj1-travel", "apj1-front", "apj1-tools"]
+    },
+    "BucketName": {
+      "Description": "Bucket Name",
+      "Type": "String"
+    }
+  },
+  "Mappings": {
+    "TemplateParamaters": {
+      "Module": {
+        "ModuleFolderName": "mssql-scripts",
+        "ModuleZipFileName": "mssql-module-",
+        "Scripts": "scripts",
+        "Repository": "AWSInstanceDeployHub",
+        "SSLModuleZipFileName": "TunableSSLValidator.zip",
+        "CACertVaultPath": "https://consul.service.cnqr.tech/v1/kv/pki/ca_bundle",
+        "CACertLocation": "C:\\Program Files\\Amazon\\cfn-bootstrap\\cacert.pem"
+      },
+      "Disk": {
+        "RootDiskSize": "100",
+        "BlockDiskSize": "1000"
+      },
+      "Vault": {
+        "NameSpace": "tools/dbsql"
+      },
+      "pageFileSizeMB": {
+        "size": "76800"
+      }
+    },
+    "UserRole": {
+      "DBA": { "Owner":  "iops-db@sap.com", "Team":  "DBA", "JiraAlias":  "CSCI"}
+    },
+    "AWSAccountID": {
+      "957236237862": { "AccountName": "tools", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "017656337997": { "AccountName": "travel", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "468669635168": { "AccountName": "spend", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "501939023848": { "AccountName": "report", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "979224746709": { "AccountName": "front", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+
+      "271931939120": { "AccountName": "tools", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "279762448776": { "AccountName": "spend", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "277311640285": { "AccountName": "report", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "279767731023": { "AccountName": "travel", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "277336960726": { "AccountName": "front", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+
+      "750800039034": { "AccountName": "tools", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "162751625961": { "AccountName": "spend", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "420207302444": { "AccountName": "report", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-reporting" },
+      "410945943071": { "AccountName": "travel", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "726167180837": { "AccountName": "front", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "413688005887": { "AccountName": "reportmigration", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-reporting" },
+
+      "279778316745": { "AccountName": "tools", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "183676229290": { "AccountName": "travel", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "267203563179": { "AccountName": "report", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "740915620366": { "AccountName": "front", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "515680752897": { "AccountName": "spend", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      "724191440523": { "AccountName": "reportmigration", "ImageID": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}", "SolarwindsName": "solarwinds-central" },
+      
+      "572574059774": { "AccountName": "tools", "ImageID": "{{resolve:ssm:/concur-console-image-factory/impact/dbsqlWIN/TEST}}", "SolarwindsName": "solarwinds-central" },
+      "238321242042": { "AccountName": "travel", "ImageID": "{{resolve:ssm:/concur-console-image-factory/impact/dbsqlWIN/PROD}}", "SolarwindsName": "solarwinds-central" },
+      "617369586452": { "AccountName": "report", "ImageID": "{{resolve:ssm:/concur-console-image-factory/impact/dbsqlWIN/PROD}}", "SolarwindsName": "solarwinds-central" },
+      "866971198914": { "AccountName": "front", "ImageID": "{{resolve:ssm:/concur-console-image-factory/impact/dbsqlWIN/PROD}}", "SolarwindsName": "solarwinds-central" },
+      "164295797471": { "AccountName": "spend", "ImageID": "{{resolve:ssm:/concur-console-image-factory/impact/dbsqlWIN/PROD}}", "SolarwindsName": "solarwinds-central" }
+    },
+    "VPC": {
+      "INTEGRATION": {
+        "PortNumberForSQLServer": "2020",
+        "HttpsProxyUrl": "http://proxy.service.cnqr.tech:3128",
+        "HttpsProxyExclusions": "",
+        "SNSTopic": "arn:aws:sns:us-west-2:957236237862:DEVTEST-orch-api-topic",
+        "DomainSuffix": "integration.system.cnqr.tech",
+        "NewRelicKey": "a63453ef265cd96ad67f8455232a40810ef8NRAL",
+        "awsRegion": "us-west-2"
+      },
+      "USPSCC": {
+        "PortNumberForSQLServer": "2020",
+        "HttpsProxyUrl": "http://proxy.service.cnqr.tech:3128",
+        "HttpsProxyExclusions": "",
+        "SNSTopic": "arn:aws-us-gov:sns:us-gov-west-1:271931939120:PSCC-orch-api-topic",
+        "DomainSuffix": "uspscc.system.cnqr.tech",
+        "NewRelicKey": "bab15aa86d05d26892f5d732058863706873739d",
+        "awsRegion": "us-gov-west-1"
+      },
+      "US2": {
+        "PortNumberForSQLServer": "2040",
+        "HttpsProxyUrl": "http://proxy.service.cnqr.tech:3128",
+        "HttpsProxyExclusions": "",
+        "DomainSuffix": "us2.system.cnqr.tech",
+        "NewRelicKey": "6dcd81c47bca2a1748f86adf340d67463c60NRAL",
+        "awsRegion": "us-west-2"
+      },
+      "EU2": {
+        "PortNumberForSQLServer": "2050",
+        "HttpsProxyUrl": "http://proxy.service.cnqr.tech:3128",
+        "HttpsProxyExclusions": "",
+        "DomainSuffix": "eu2.system.cnqr.tech",
+        "NewRelicKey": "adae03325148551fa3d75b64d4a98fe7207dNRAL",
+        "awsRegion": "eu-central-1"
+      },
+      "APJ1": {
+        "PortNumberForSQLServer": "2060",
+        "HttpsProxyUrl": "http://proxy.service.cnqr.tech:3128",
+        "HttpsProxyExclusions": "",
+        "DomainSuffix": "apj1.system.cnqr.tech",
+        "NewRelicKey": "8bb876da0a0fe2892ff0c79e05d7fc19ca1bNRAL",
+        "awsRegion": "ap-northeast-1"
+      }
+    },
+    "Version": {
+      "Template": {
+        "TemplateVersion": "v9.0",
+        "TemplateType": "Cluster"
+      },
+      "Module": {
+        "ModuleVersion": "v90"
+      }
+    }
+  },
+  "Conditions": {
+    "HasNVMe": { 
+      "Fn::And": [
+        { "Fn::Or": [
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "r6id.xlarge"]},
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "r6id.2xlarge"]},
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "r6id.4xlarge"]},
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "r6id.8xlarge"]},
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "r6id.12xlarge"]},
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "r6id.16xlarge"]}
+        ]},
+        { "Fn::Or": [
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "x2iedn.xlarge"]},
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "x2iedn.2xlarge"]},
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "x2iedn.4xlarge"]},
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "x2iedn.8xlarge"]},
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "x2iedn.16xlarge"]},
+          {"Fn::Equals": [{ "Ref": "InstanceType" }, "x2iedn.32xlarge"]}
+        ]}
+      ]
+    },
+    "MONITORING": {
+      "Fn::Or": [
+        {"Fn::Equals": [{ "Ref": "ConfigType" }, "PRODUCTION"]},
+        {"Fn::Equals": [{ "Ref": "ConfigType" }, "TESTING-ALL"]},
+        {"Fn::Equals": [{ "Ref": "ConfigType" }, "TESTING-DEPLOYMENT"]}
+      ]
+    },
+    "PRODUCTION": {"Fn::Equals": [{ "Ref": "ConfigType" }, "PRODUCTION"]},
+    "IopsCond": {"Fn::Equals": [{ "Ref": "Environment" }, "INTEGRATION"]}
+  },
+  "Resources": {
+    "CFNCheckStackConditions": {
+      "Type": "AWS::CloudFormation::CustomResource",
+      "Properties": {
+        "ServiceToken": {"Fn::Sub": "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:MSSQLLambda-CFNCheckStackConditions"}
+      }
+    },
+    "MssqlServerLaunchTemplate": {
+      "Type": "AWS::EC2::LaunchTemplate",
+      "Metadata": {
+        "AWS::CloudFormation::Init": {
+          "configSets" : {
+            "mssql_provisioning":[
+              "open_ports",
+              "MSDTC_config",
+              "write_cluster_node_addresses",
+              "download_mssql_scripts",
+              "add_EC2_tags",
+              "configure_vault",
+              "set_env_variables_settings",
+              "add_to_domain",
+              "integrate_roletype",
+              "uninstall_windows_defender",
+              "invoke_storage_config",
+              "configure_PageFile",
+              "invoke_sql_base_install",
+              "invoke_sql_configure",
+              "invoke_failover_install",
+              "create_cluster",
+              "setup_backuprootname_extended_property",
+              "configure_SQLAuditJob",
+              "splunk_configuration",
+              "configure_AnomalyDetection",
+              { "Fn::If": [
+                  "MONITORING",
+                  [
+                    "install_NewRelic",
+                    "register_DB_to_SolarWinds"
+                  ],
+                  {"Ref": "AWS::NoValue"}
+                ]
+              },
+              "create_monitoring_Jobs",
+              "create_cert_Jobs",
+              "create_cert_Notification",
+              "configure_Amazon_SSMAgent",
+              "install_CloudWatch",
+              "validate_server_compliance",
+              "run_prebuild_scripts",
+              "run_PostBuild_Scripts",
+              "remove_creds"
+            ]
+          },
+          "run_prebuild_scripts": {
+            "commands": {
+               "0-run_prebuild_scripts" :{
+                 "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\run_prebuild_scripts.ps1",
+                 "waitAfterCompletion" : "0"
+               }
+             }
+          },
+          "open_ports": {
+            "files": {
+              "C:\\cfn\\temp\\open_ports.ps1": {
+                "content" : { "Fn::Join" : ["", [
+                  "New-NetFirewallRule -DisplayName 'SQLServer' -Direction Inbound -LocalPort ", {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "PortNumberForSQLServer"]}, ",1434 -Protocol TCP -Action Allow \n",
+                  "New-NetFirewallRule -DisplayName 'SQLServerUDP' -Direction Inbound -LocalPort 1434 -Protocol UDP -Action Allow \n",
+                  "New-NetFirewallRule -DisplayName 'FileCopy' -Direction Inbound -LocalPort 135,138,445 -Protocol TCP -Action Allow \n",
+                  "New-NetFirewallRule -DisplayName 'FileCopyUDP' -Direction Inbound -LocalPort 137 -Protocol UDP -Action Allow \n"
+                ] ]}
+              }
+            },
+            "commands": {
+              "0-invoke-openPorts" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\open_ports.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "MSDTC_config": {
+            "files": {
+              "C:\\cfn\\temp\\MSDTC_config.ps1": {
+                "content" : { "Fn::Join" : ["", [
+                  "Set-NetFirewallRule -DisplayGroup 'Distributed Transaction Coordinator' -Enabled True -PassThru \n",
+                  "Set-DtcNetworkSetting -DtcName local -AuthenticationLevel NoAuth -InboundTransactionsEnabled $true -OutboundTransactionsEnabled $true -RemoteClientAccessEnabled $true -Confirm:$false \n",
+                  "Restart-Service msdtc -Force \n"
+                ] ]}
+              }
+            },
+            "commands": {
+              "0-invoke-MSDTC-Config" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\MSDTC_config.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "configure_PageFile": {
+            "commands": {
+              "0-configure_PageFile" :{
+                "command": { "Fn::Sub": [
+                  "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\configure_PageFile.ps1 -pageFileSizeMB ${pageFileSizeMB}",
+                  {
+                    "pageFileSizeMB": {"Fn::FindInMap" : ["TemplateParamaters", "pageFileSizeMB", "size"]}
+                  }
+                  ]},
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "install_CloudWatch": {
+            "commands": {
+              "0-install_CloudWatch" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\install_CloudWatch.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "configure_Amazon_SSMAgent": {
+            "files" : {
+              "C:\\cfn\\temp\\configure_Amazon_SSMAgent.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "$Global:mssqlScriptsFolder=\"C:\\mssql-scripts\" \n",
+                  "cd $mssqlScriptsFolder \n",
+                  "$Global:logsFolder = \"$mssqlScriptsFolder\\automation_logs\"\n",
+                  "$timestamp = [int](Get-Date -UFormat %s -Millisecond 0)\n",
+                  "$Global:logFile = \"$logsFolder\\configure_Amazon_SSMAgent_log_$timestamp.log\"\n",
+                  "Write-Output (\">>>>>>>>>> Started configure_Amazon_SSMAgent at: $(Get-Date -format 'u') >>>>>>>>>>\") | Out-File -Append $logFile\n",
+                  "$PROXY=\"http://proxy.service.cnqr.tech:3128\"\n",
+                  "$PROXYBYPASS=\"169.254.169.254;ssm.us-west-2.amazonaws.com;ssmmessages.us-west-2.amazonaws.com;ssm.eu-central-1.amazonaws.com;ssmmessages.eu-central-1.amazonaws.com;ec2messages.us-west-2.amazonaws.com;localhost;127.0.0.1;169.254.169.123;169.254.169.254;dynamodb.us-west-2.amazonaws.com;ec2.us-west-2.amazonaws.com;kms.us-west-2.amazonaws.com;logs.us-west-2.amazonaws.com;logs.eu-central-1.amazonaws.com;s3.eu-central-1.amazonaws.com;*.s3.eu-central-1.amazonaws.com;s3.us-west-2.amazonaws.com;s3.dualstack.us-west-2.amazonaws.com;secretsmanager.us-west-2.amazonaws.com;sns.us-west-2.amazonaws.com;sqs.us-west-2.amazonaws.com;sts.us-west-2.amazonaws.com;*.cnqr.io;*.cnqr.delivery;*.cnqr.tech;*.consul;*.elb.amazonaws.com;iam.amazonaws.com\"\n",                  
+                  "netsh winhttp set proxy proxy-server=\"$PROXY\" bypass-list=\"$PROXYBYPASS\"\n",
+                  "$serviceKey = \"HKLM:\\SYSTEM\\CurrentControlSet\\Services\\AmazonSSMAgent\"\n",
+                  "$keyInfo = (Get-Item -Path $serviceKey).GetValue(\"Environment\")\n",
+                  "$proxyVariables = @(\"http_proxy=http://proxy.service.cnqr.tech:3128\", \"no_proxy=169.254.169.254,ssm.us-west-2.amazonaws.com,ssmmessages.us-west-2.amazonaws.com,ssm.eu-central-1.amazonaws.com,ssmmessages.eu-central-1.amazonaws.com,ec2messages.us-west-2.amazonaws.com,localhost,127.0.0.1,169.254.169.123,169.254.169.254,dynamodb.us-west-2.amazonaws.com,ec2.us-west-2.amazonaws.com,kms.us-west-2.amazonaws.com,logs.us-west-2.amazonaws.com,logs.eu-central-1.amazonaws.com,s3.eu-central-1.amazonaws.com,*.s3.eu-central-1.amazonaws.com,s3.us-west-2.amazonaws.com,s3.dualstack.us-west-2.amazonaws.com,secretsmanager.us-west-2.amazonaws.com,sns.us-west-2.amazonaws.com,sqs.us-west-2.amazonaws.com,sts.us-west-2.amazonaws.com,*.cnqr.io,*.cnqr.delivery,*.cnqr.tech,*.consul,*.elb.amazonaws.com,iam.amazonaws.com\")\n",                  
+                  "If($keyInfo -eq $null){\n",
+                  "    New-ItemProperty -Path $serviceKey -Name Environment -Value $proxyVariables -PropertyType MultiString -Force\n",
+                  "}\n",
+                  "else{\n",
+                  "    Set-ItemProperty -Path $serviceKey -Name Environment -Value $proxyVariables\n",
+                  "}\n",
+                  "$ExecResults = Get-ItemProperty -Path $serviceKey\n",
+                  "$ExecResults | Out-File -Append $logFile\n",
+                  "Restart-Service AmazonSSMAgent | Out-Null \n",
+                  "Write-Output (\"<<<<<<<<<< Completed configure_Amazon_SSMAgent at: $(Get-Date -format 'u') <<<<<<<<<<\") | Out-File -Append $logFile\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-configure-SSMAgent": {
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\configure_Amazon_SSMAgent.ps1",
+                "waitAfterCompletion": "0"
+              }
+            }
+          },
+          "write_cluster_node_addresses": {
+            "files": {
+              "C:\\cfn\\temp\\get_cluster_nodes_addresses.ps1": {
+                "content" : { "Fn::Join" : ["", [
+                  "$Global:MasterPrivateIP = '", {"Fn::GetAtt": ["MasterNetworkInterface", "PrimaryPrivateIpAddress"]}, "' \n",
+                  "$Global:MasterSecondaryIPs = @('",
+                  {"Fn::Select": ["0", {"Fn::GetAtt": ["MasterNetworkInterface", "SecondaryPrivateIpAddresses"]}]}, "', '",
+                  {"Fn::Select": ["1", {"Fn::GetAtt": ["MasterNetworkInterface", "SecondaryPrivateIpAddresses"]}]}, "' ) \n",
+                  "$Global:Worker1PrivateIP = '", {"Fn::GetAtt": ["Worker1NetworkInterface", "PrimaryPrivateIpAddress"]}, "' \n",
+                  "$Global:Worker1SecondaryIPs = @('",
+                  {"Fn::Select": ["0", {"Fn::GetAtt": ["Worker1NetworkInterface", "SecondaryPrivateIpAddresses"]}]}, "', '",
+                  {"Fn::Select": ["1", {"Fn::GetAtt": ["Worker1NetworkInterface", "SecondaryPrivateIpAddresses"]}]}, "' ) \n",
+                  "$Global:Worker2PrivateIP = '", {"Fn::GetAtt": ["Worker2NetworkInterface", "PrimaryPrivateIpAddress"]}, "' \n",
+                  "$Global:Worker2SecondaryIPs = @('",
+                  {"Fn::Select": ["0", {"Fn::GetAtt": ["Worker2NetworkInterface", "SecondaryPrivateIpAddresses"]}]}, "', '",
+                  {"Fn::Select": ["1", {"Fn::GetAtt": ["Worker2NetworkInterface", "SecondaryPrivateIpAddresses"]}]}, "' ) \n"
+                ] ]}
+              }
+            }
+          },
+          "download_mssql_scripts": {
+            "files" : {
+              "C:\\cfn\\temp\\send_log.ps1": {
+                "content" : { "Fn::Join" : ["", [
+                  "$msg = $($args[0]) \n",
+                  "function Send-Log { \n",
+                  "$sendLogsFolder='C:\\logs' \n",
+                  "$applicationLogFile = $sendLogsFolder + '\\application.log' \n",
+                  "if ((Test-Path $sendLogsFolder) -eq $false) { \n",
+                  "New-Item -ItemType 'directory' -Path $sendLogsFolder | Out-Null \n",
+                  "} \n",
+                  "$logStatement = @{type=\"log\";application=\"DBFormation_MSSQL\";roletype= \"", {"Ref" : "RoleType" }, "\";description=\"$msg\";level=\"INFO\";data_version=2;stackname=\"", { "Ref" : "AWS::StackName" }, "\"} \n",
+                  "$logStatement = ($logStatement | ConvertTo-Json -Compress) \n",
+                  "$logStatement.ToString() | Out-File -Append  -Encoding ASCII $applicationLogFile \n",
+                  "} \n",
+                  "Send-Log \n"
+                ] ]}
+              },
+              "C:\\cfn\\temp\\download_mssql_scripts.ps1" : {
+                "content": { "Fn::Join" : ["", [
+                  "$Global:mssqlScriptsFolder=\"C:\\mssql-scripts\" \n",
+                  "$Global:logsFolder = \"$mssqlScriptsFolder\\automation_logs\"\n",
+                  "New-Item $logsFolder -type directory -force | Out-Null\n",
+                  "$Global:S3Bucket = \"s3://", {"Ref":  "BucketName" }, "/AWSInstanceDeployHub/scripts/mssql-scripts/\"\n",
+                  "aws s3 cp $S3Bucket $mssqlScriptsFolder\\ --recursive --no-progress --quiet\n",
+                  "$SearchValue = '<sqlversion>'\n",
+                  "$ReplaceValue = '",{"Ref": "SQLVersion"},"'\n",
+                  "(Get-Content $mssqlScriptsFolder\\mssql_artifact_downloader.ps1).replace($SearchValue,$ReplaceValue) | Set-Content $mssqlScriptsFolder\\mssql_artifact_downloader.ps1\n",
+                  "(Get-Content $mssqlScriptsFolder\\mssql_environment_loader.ps1).replace($SearchValue,$ReplaceValue) | Set-Content $mssqlScriptsFolder\\mssql_environment_loader.ps1\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-download_mssql_scripts" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\download_mssql_scripts.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "add_EC2_tags": {
+            "commands": {
+              "0-invoke-add_EC2_tags" :{
+                "command": { "Fn::Sub": [
+                  "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\add_EC2_tags.ps1 -awsStackName ${awsStackName} -VPC ${VPC} -SQLVersion ${SQLVersion} -PrimaryCName ${PrimaryCName} -AdditionalCNames \"${AdditionalCNames}\"",
+                  {
+                    "awsStackName": {"Ref":"AWS::StackName"},
+                    "VPC": {"Fn::FindInMap" : ["AWSAccountID", {"Ref": "AWS::AccountId"}, "AccountName"]},
+                    "PrimaryCName": {"Ref": "NameOfCRecordForListener" },
+                    "AdditionalCNames": {"Ref": "NameOfCRecordsAdditional" },
+                    "SQLVersion":  {"Ref": "SQLVersion"}
+                  }
+                ]},
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "configure_vault": {
+            "files" : {
+              "C:\\cfn\\temp\\configure_vault.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "$Global:mssqlScriptsFolder=\"C:\\mssql-scripts\" \n",
+                  "cd $mssqlScriptsFolder \n",
+                  "$Global:logsFolder = \"$mssqlScriptsFolder\\automation_logs\"\n",
+                  "$timestamp = [int](Get-Date -UFormat %s -Millisecond 0)\n",
+                  "$Global:logFile = \"$logsFolder\\configure_vault_log_$timestamp.log\"\n",
+                  "$Global:DownloadURL = \"s3://",{"Ref":  "BucketName" }, "/AWSInstanceDeployHub/scripts/vault/\"\n",
+                  "$Global:vaultPath = \"C:\\vault\"\n",
+                  "Write-Output (\">>>>>>>>>> Started configure_vault at: $(Get-Date -format 'u') >>>>>>>>>>\") | Out-File -Append $logFile\n",
+                  "$env:https_proxy = ''\n",
+                  "New-Item -ItemType Directory -Path c:\\vault -Force | out-null\n",
+                  "aws s3 cp $DownloadURL $vaultPath --recursive --no-progress\n",
+                  "$ExecResults = (Get-ChildItem -Path $vaultPath *>&1 )\n",
+                  "$ExecResults | Out-File -Append $logFile\n",
+                  "Write-Output (\"<<<<<<<<<< Completed configure_vault at: $(Get-Date -format 'u') <<<<<<<<<<\") | Out-File -Append $logFile\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-enableProxy" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\configure_vault.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+        },
+          "add_to_domain": {
+            "files" : {
+              "C:\\cfn\\temp\\add_to_domain.ps1" : {
+                "content": { "Fn::Join" : ["", [
+                  "try { \n",
+                  " $script = Get-Content C:\\mssql-scripts\\domainjoin.ps1 \n",
+                  " $script = $script.Replace('<DomainSuffix>','",{"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "DomainSuffix"]},"') \n",
+                  " $script = $script.Replace('<ProvisioningAccount>','sa_dba_prov') \n",
+                  " $script = $script.Replace('<VaultNamespace>','",{"Fn::FindInMap" : ["TemplateParamaters", "Vault", "NameSpace"]},"') \n",
+                  " $script = $script.Replace('<awsRegion>','",{"Fn::FindInMap" : ["VPC", {"Ref": "Environment" }, "awsRegion"]},"') \n",
+                  " Set-Content -Path 'C:\\cfn\\temp\\domainjoin.ps1' -Value $script \n",
+                  " C:\\cfn\\temp\\domainjoin.ps1 \n",
+                  "} catch { $_ | fl -Force \n",
+                  " $ProxyVar = $env:https_proxy\n",
+                  " $env:https_proxy = ''\n",
+                  { "Fn::Sub": [
+                    " cfn-signal.exe -e 1 --region '${AWS::Region}' --resource 'MssqlServerInstallWaitCondition' --stack '${AWS::StackName}' \n",
+                    { "HttpsProxyUrl": {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "HttpsProxyUrl"]}}
+                  ]},
+                  " $env:https_proxy = $ProxyVar } \n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-addToDomain" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\add_to_domain.ps1",
+                "waitAfterCompletion" : "forever"
+              }
+            }
+          },
+          "integrate_roletype": {
+            "files" : {
+              "C:\\cfn\\temp\\integrate_roletype.ps1" : {
+                "content": { "Fn::Join" : ["", [
+                  "$ComputerName = (get-WmiObject win32_computersystem).Name \n",
+                  "$ComputerName = $ComputerName.ToUpper() \n",
+                  "$adsi = [ADSI]\"WinNT://$ComputerName/administrators,group\" \n",
+                  { "Fn::Sub": [
+                    "if( \"${Domain}\" -eq \"USPSCC-BETA\" ) { \n",
+                    { "Domain":  {"Ref":  "Environment" } }
+                  ]},
+                  "$adsi.add(\"WinNT://USPSCC", "/", {"Ref" : "RoleType" }, "_admins,group\") \n",
+                  "} else { \n",
+                  "$adsi.add(\"WinNT://", {"Ref":  "Environment" }, "/", {"Ref" : "RoleType" }, "_admins,group\") \n",
+                  "} \n",
+                  "$domain = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name.Replace('.system.cnqr.tech','') \n",
+                  "Add-LocalGroupMember -Group 'Administrators' -Member \"$domain\\sa_sqlbackup\" \n",
+                  "$msg = \"Adding ", {"Ref" : "RoleType" }, "_admins group and $domain\\sa_sqlbackup account to local Administrator group task completed\" \n",
+                  "& C:\\cfn\\temp\\send_log.ps1 $msg \n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-integrateRoletype" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\integrate_roletype.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "uninstall_windows_defender":{
+            "files": {
+              "C:\\cfn\\temp\\uninstall_defender.ps1": {
+                "content": { "Fn::Join": [ "\r\n", [
+                  "try { \n",
+                  "    if ( $(Get-WindowsFeature -Name Windows-Defender).Installed) {\n ",
+                  "        Uninstall-WindowsFeature -Name Windows-Defender -Confirm:$false -Remove \n",
+                  "        Write-Host \"Windows Defender Uninstalled\" \n",
+                  "    } else { \n",
+                  "        Write-Host \"Windows Defender is not installed\" \n",
+                  "    } \n",
+                  "} catch { \n",
+                  "    Write-Error \"Windows Defender Uninstallation failed\" \n",
+                  "} \n"
+                ] ] }
+              }
+            },
+            "commands": {
+              "0-invoke-uninstallWinDefender" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\uninstall_defender.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "invoke_storage_config": {
+            "commands": {
+              "0-invoke-storageConfig" :{
+                "command": { "Fn::Join" : ["", [
+                  "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\storage_config.ps1 -NVMe ",
+                  { "Fn::If": ["HasNVMe",1,0] }
+                ]]},
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "invoke_sql_base_install": {
+            "files" : {
+              "C:\\cfn\\temp\\sql_base_install.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "$Global:StackName = \"", { "Ref" : "AWS::StackName" }, "\" \n",
+                  "$Global:TemplateType = \"ClusterTemplate\" \n",
+                  "$Global:Region = \"", { "Ref" : "AWS::Region"}, "\" \n",
+                  "$Global:Proxy = \"", {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "HttpsProxyUrl"]}, "\" \n",
+                  "$Global:RoleType = \"", {"Ref" : "RoleType" }, "\" \n",
+                  "cd 'C:\\", {"Fn::FindInMap" : [ "TemplateParamaters", "Module", "ModuleFolderName"]}, "'\n",
+                  "./install.ps1\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-sqlBaseInstall" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\sql_base_install.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "invoke_sql_configure": {
+            "files" : {
+              "C:\\cfn\\temp\\sql_configure.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "$Global:StackName = \"", { "Ref" : "AWS::StackName" }, "\" \n",
+                  "$Global:TemplateType = \"ClusterTemplate\" \n",
+                  "$Global:Region = \"", { "Ref" : "AWS::Region"}, "\" \n",
+                  "$Global:Proxy = \"", {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "HttpsProxyUrl"]}, "\" \n",
+                  "$Global:CustomSqlPort = ", {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "PortNumberForSQLServer"]}, " \n",
+                  "$Global:RoleType = \"", {"Ref" : "RoleType" }, "\" \n",
+                  "cd 'C:\\", {"Fn::FindInMap" : [ "TemplateParamaters", "Module", "ModuleFolderName"]}, "'\n",
+                  "./mssql_configurator.ps1\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-sqlConfigure" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\sql_configure.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "invoke_wsfc_install": {
+            "commands": {
+              "0-invoke-failover-install" :{
+                "command": { "Fn::Sub": [
+                  "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\install_foservice.ps1 -TemplateType ${TemplateType}",
+                {
+                  "TemplateType": "ClusterTemplate"
+                }
+                ]},
+                "waitAfterCompletion" : "forever"
+              }
+            }
+          },
+          "create_cluster": {
+            "commands": {
+              "0-create-cluster" :{
+                "command": { "Fn::Sub": [
+                  "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\initiate_cluster.ps1 -StackName ${awsStackName} -clusterName ${clusterName} -region ${region} -proxy ${proxy} -roletype ${roletype}",
+                  {
+                    "awsStackName": {"Ref":"AWS::StackName"},
+                    "clusterName": {"Fn::FindInMap" : ["AWSAccountID", {"Ref": "AWS::AccountId"}, "AccountName"]},
+                    "region": {"Ref": "AWS::Region" },
+                    "proxy": {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "HttpsProxyUrl"]},
+                    "roletype": {"Ref": "RoleType"}
+                  }
+                ]},
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "setup_backuprootname_extended_property": {
+            "commands": {
+              "0-invoke-setupCnameExtendedProperty" :{
+                "command": {
+                  "Fn::Sub": [
+                    "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\setup_backuprootname_extended_property.ps1 -SQLPort ${p0} -Prefix ${p1} -VPC ${p2}",
+                    {
+                      "p0": {"Fn::FindInMap" : ["VPC", {"Ref": "Environment" }, "PortNumberForSQLServer"]},
+                      "p1": {"Ref":"AWS::StackName"},
+                      "p2": {"Fn::FindInMap": ["AWSAccountID",{"Ref": "AWS::AccountId"},"AccountName"]}
+                    }
+                  ]
+                },
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "configure_SQLAuditJob": {
+            "files" : {
+              "C:\\cfn\\temp\\configure_SQLAuditJob.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "cd C:\\vault\n",
+                  ". .\\Get-VaultPassword.ps1\n",
+                  ". .\\Get-VaultToken.ps1\n",
+                  "$awsRegion = '",{"Fn::FindInMap" : ["VPC", {"Ref": "Environment" }, "awsRegion"]},"'\n",
+                  "$vault_namespace = '",{"Fn::FindInMap" : ["TemplateParamaters", "Vault", "NameSpace"]},"'\n",
+                  "$token = Get-VaultToken -vault_namespace $vault_namespace -aws_region $awsRegion\n",
+                  "$env:https_proxy = ''\n",
+                  "$Account = Get-VaultPassword -vault_namespace $vault_namespace -aws_region $awsRegion -Name sa_sqlbackup -token $token\n",
+                  "$pwdstr = $($Account.GetNetworkCredential().Password).Replace(\"'\",\"''\")\n",
+                  "$Global:s3Bucket = \"",{"Ref":  "BucketName" }, "\"\n",
+                  "$sqlQuery = \"CREATE LOGIN [", {"Ref": "Environment" }, "\\sa_sqlbackup] FROM WINDOWS WITH DEFAULT_DATABASE=[master], DEFAULT_LANGUAGE=[us_english];\n",
+                  "ALTER SERVER ROLE [sysadmin] ADD MEMBER [", {"Ref": "Environment" }, "\\sa_sqlbackup];\n",
+                  "CREATE CREDENTIAL [", {"Ref": "Environment" }, "\\sa_sqlbackup] WITH IDENTITY = '", {"Ref": "Environment" }, "\\sa_sqlbackup',SECRET = '$pwdstr';\n",
+                  "EXEC msdb.dbo.sp_add_proxy @proxy_name=N'sqlbackup',@credential_name=N'", {"Ref": "Environment" }, "\\sa_sqlbackup', @enabled=1;\n",
+                  "EXEC msdb.dbo.sp_grant_proxy_to_subsystem @proxy_name=N'sqlbackup', @subsystem_id=3;\n",
+                  "EXEC msdb.dbo.sp_grant_proxy_to_subsystem @proxy_name=N'sqlbackup', @subsystem_id=12;\"\n",
+                  "Invoke-Sqlcmd -Database master -Query $sqlQuery -QueryTimeout 30;\n",
+                  "aws s3 cp s3://$s3Bucket/AWSInstanceDeployHub/scripts/AuditTrace/_Deploy.ps1 C:\\", {"Fn::FindInMap" : [ "TemplateParamaters", "Module", "ModuleFolderName"]}, " --quiet\n",
+                  "cd 'C:\\", {"Fn::FindInMap" : [ "TemplateParamaters", "Module", "ModuleFolderName"]}, "'\n",
+                  "./_Deploy.ps1\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-configure-SQLAuditJob" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\configure_SQLAuditJob.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "set_env_variables_settings": {
+            "files" : {
+              "C:\\cfn\\temp\\CFN_Variables.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "$StackName = '",{ "Ref" : "AWS::StackName" },"'\n",
+                  "$NameOfCRecord = '",{"Ref" : "NameOfCRecordForListener" },"'\n",
+                  "$AWSAccountName = '",{"Fn::FindInMap" : [ "AWSAccountID", {"Ref": "AWS::AccountId"}, "AccountName" ]},"'\n",
+                  "$VaultNameSpace = '",{"Fn::FindInMap" : [ "TemplateParamaters", "Vault", "NameSpace" ]},"'\n",
+                  "$S3BucketName = '",  {"Ref":  "BucketName" },"'\n",
+                  "$domainSuffice = '",{"Fn::FindInMap" : [ "VPC",{"Ref":"Environment"},"DomainSuffix" ]},"'\n",
+                  "$Scripts = '",{"Fn::FindInMap" : [ "TemplateParamaters", "Module", "Scripts" ]},"'\n",
+                  "$Repository = '",{"Fn::FindInMap" : [ "TemplateParamaters", "Module", "Repository" ]},"'\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-enableProxy" : {
+                "command": {
+                    "Fn::Sub": [
+                        "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\enable_env_variables.ps1 -awsEnvironment ${awsEnv} -awsRegion ${awsReg} -accountName ${accountName}  -cRecordName ${cRecordName} -domainSuffix ${domainSuffix} -proxyURL ${proxyURL} -s3Bucket ${s3Bucket} -stackName ${stackName} -vaultNameSpace ${vaultNameSpace} -mainPrimaryIPAddr ${mainPrimaryIPAddr} -mainSecondaryIPAddr ${mainSecondaryIPAddr1},${mainSecondaryIPAddr2} -worker1PrimaryIPAddr ${worker1PrimaryIPAddr} -worker1SecondaryIPAddr ${worker1SecondaryIPAddr1},${worker1SecondaryIPAddr2} -worker2PrimaryIPAddr ${worker2PrimaryIPAddr} -worker2SecondaryIPAddr ${worker2SecondaryIPAddr1},${worker2SecondaryIPAddr2} -scripts ${scripts} -repository ${repository}",
+                        {
+                          "awsEnv": {"Ref": "Environment"},
+                          "awsReg" : {"Fn::FindInMap" : ["VPC", {"Ref": "Environment" }, "awsRegion"]},
+                          "accountName": {"Fn::FindInMap": ["AWSAccountID",{"Ref": "AWS::AccountId"},"AccountName"]},
+                          "cRecordName": {"Ref":"NameOfCRecordForListener"},
+                          "domainSuffix": {"Fn::FindInMap" : [ "VPC",{"Ref":"Environment"},"DomainSuffix" ]},
+                          "proxyURL": {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "HttpsProxyUrl"]},
+                          "s3Bucket": {"Ref":  "BucketName" },
+                          "stackName": {"Ref":"AWS::StackName"},
+                          "vaultNameSpace": {"Fn::FindInMap" : [ "TemplateParamaters", "Vault", "NameSpace" ]},
+                          "mainPrimaryIPAddr": {"Fn::GetAtt": ["MasterNetworkInterface", "PrimaryPrivateIpAddress"]},
+                          "mainSecondaryIPAddr1": {"Fn::Select": ["0", {"Fn::GetAtt": ["MasterNetworkInterface", "SecondaryPrivateIpAddresses"]}]},
+                          "mainSecondaryIPAddr2": {"Fn::Select": ["1", {"Fn::GetAtt": ["MasterNetworkInterface", "SecondaryPrivateIpAddresses"]}]},
+                          "worker1PrimaryIPAddr": {"Fn::GetAtt": ["Worker1NetworkInterface", "PrimaryPrivateIpAddress"]},
+                          "worker1SecondaryIPAddr1": {"Fn::Select": ["0", {"Fn::GetAtt": ["Worker1NetworkInterface", "SecondaryPrivateIpAddresses"]}]},
+                          "worker1SecondaryIPAddr2": {"Fn::Select": ["1", {"Fn::GetAtt": ["Worker1NetworkInterface", "SecondaryPrivateIpAddresses"]}]},
+                          "worker2PrimaryIPAddr": {"Fn::GetAtt": ["Worker2NetworkInterface", "PrimaryPrivateIpAddress"]},
+                          "worker2SecondaryIPAddr1": {"Fn::Select": ["0", {"Fn::GetAtt": ["Worker2NetworkInterface", "SecondaryPrivateIpAddresses"]}]},
+                          "worker2SecondaryIPAddr2": {"Fn::Select": ["1", {"Fn::GetAtt": ["Worker2NetworkInterface", "SecondaryPrivateIpAddresses"]}]},
+                          "scripts": {"Fn::FindInMap" : [ "TemplateParamaters", "Module", "Scripts" ]},
+                          "repository": {"Fn::FindInMap" : [ "TemplateParamaters", "Module", "Repository" ]}                                                                                  
+                        }
+                    ]
+                },
+                "waitAfterCompletion": "0"
+              }
+            }
+          },
+          "splunk_configuration": {
+            "files" : {
+              "C:\\cfn\\temp\\configure_splunk.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "$Global:mssqlScriptsFolder=\"C:\\mssql-scripts\" \n",
+                  "cd $mssqlScriptsFolder \n",
+                  "$Global:logsFolder = \"$mssqlScriptsFolder\\automation_logs\"\n",
+                  "$timestamp = [int](Get-Date -UFormat %s -Millisecond 0)\n",
+                  "$Global:logFile = \"$logsFolder\\configure_Splunk_log_$timestamp.log\"\n",
+                  "Write-Output (\">>>>>>>>>> Started configure_Splunk at: $(Get-Date -format 'u') >>>>>>>>>>\") | Out-File -Append $logFile\n",
+                  "$roletype = 'dbsql'\n",
+                  "$hostname = $env:COMPUTERNAME\n",
+                  "$aws_env = '", {"Ref": "Environment" }, "'.ToString().ToLower()\n",
+                  "$client_name=\"$($roletype)-$($aws_env)-$($hostname)\"\n",
+                  "$splunk_home=\"C:\\Program Files\\SplunkUniversalForwarder\"\n",
+                  "$ds_file=\"$($splunk_home)\\etc\\system\\local\\deploymentclient.conf\"\n",
+                  "$file_contents=\"[deployment-client]`r`nclientName = $($client_name)\"\n",
+                  "Set-Content -Path $ds_file -Value $file_contents\n",
+                  "Get-Content -Path $ds_file\n",
+                  "Write-Output (\"<<<<<<<<<< Completed configure_Splunk at: $(Get-Date -format 'u') <<<<<<<<<<\") | Out-File -Append $logFile\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-configureSplunk" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\configure_splunk.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "configure_AnomalyDetection": {
+            "files":{
+              "C:\\cfn\\temp\\configure_AnomalyDetection.ps1": {
+                "content": {"Fn::Join" : ["", [
+                  "$Domain=", "\"", {"Ref":  "Environment" },"\" \n",
+                  "if ( $Domain -ne 'USPSCC' ) { Write-Output 'Skipping configuring Anomaly Detection in non USPSCC env..'; return; } \n",
+                  "$runFile = 'C:\\Temp\\Deploy-AnomalyDetection.ps1' \n",
+                  "$s3BucketName = '",{"Ref":  "BucketName" },"' \n",
+                  "$s3Key = '/AWSInstanceDeployHub/scripts/anomaly/Deploy-AnomalyDetection.ps1' \n",
+                  "Read-S3Object -BucketName $s3BucketName -Key $s3Key -File $runFile | Out-Null \n",
+                  ". $runFile \n",
+                  "cls \n",
+                  "Deploy-AnomalyDetection -Servers 'localhost' \n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-configure_AnomalyDetection" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\configure_AnomalyDetection.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "create_monitoring_Jobs": {
+            "files" : {
+              "C:\\cfn\\temp\\create_monitoring_Jobs.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "Clear-Host\n",
+                  "$Global:mssqlScriptsFolder=\"C:\\mssql-scripts\" \n",
+                  "cd $mssqlScriptsFolder \n",
+                  "$Global:logsFolder = \"$mssqlScriptsFolder\\automation_logs\"\n",
+                  "$timestamp = [int](Get-Date -UFormat %s -Millisecond 0)\n",
+                  "$Global:logFile = \"$logsFolder\\create_monitoring_Jobs_log_$timestamp.log\"\n",
+                  "Write-Output (\">>>>>>>>>> Started creating a Log directory at: $(Get-Date -format 'u') >>>>>>>>>>\") | Out-File -Append $logFile\n",
+                  "if(!(Test-Path -Path \"D:\\Logs\")){\n",
+                  "  New-Item -Path \"D:\\Logs\" -ItemType Directory\n",
+                  "}\n",
+                  "Write-Output (\">>>>>>>>>> Started create_monitoring_Jobs at: $(Get-Date -format 'u') >>>>>>>>>>\") | Out-File -Append $logFile\n",
+                  "$env:https_proxy = ''\n",
+                  "$S3BucketName = '",{"Ref":  "BucketName" },"' \n",
+                  "aws s3 cp s3://$S3BucketName/AWSInstanceDeployHub/scripts/monitorJobs/ D:\\PowershellScripts --recursive --no-progress | Out-File -Append $logFile \n",
+                  "Get-ChildItem D:\\PowershellScripts| Where-Object{$_.Name -like '*.sql'} | ForEach-Object{\n",
+                  "    $sqlfile = $_.FullName\n",
+                  "    try{ \n",
+                  "        Invoke-Sqlcmd -Database msdb -InputFile $sqlfile -QueryTimeout 30\n",
+                  "        Write-Output \"Deployed script file: $sqlfile... COMPLETED\"\n",
+                  "        Remove-Item -Path $sqlfile -Force\n",
+                  "    }\n",
+                  "    catch{ throw $_ }\n",
+                  "} \n",
+                  "Write-Output (\"<<<<<<<<<< Completed create_monitoring_Jobs at: $(Get-Date -format 'u') <<<<<<<<<<\") | Out-File -Append $logFile\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-creatMonitoringJobs" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\create_monitoring_Jobs.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "create_cert_Jobs": {
+            "files" : {
+              "C:\\cfn\\temp\\create_cert_Jobs.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "Clear-Host\n",
+                  "$Global:mssqlScriptsFolder=\"C:\\mssql-scripts\" \n",
+                  "cd $mssqlScriptsFolder \n",
+                  "$Global:logsFolder = \"$mssqlScriptsFolder\\automation_logs\"\n",
+                  "$timestamp = [int](Get-Date -UFormat %s -Millisecond 0)\n",
+                  "$Global:logFile = \"$logsFolder\\create_cert_Jobs_log_$timestamp.log\"\n",
+                  "Write-Output (\">>>>>>>>>> Started creating a Log directory at: $(Get-Date -format 'u') >>>>>>>>>>\") | Out-File -Append $logFile\n",
+                  "if(!(Test-Path -Path \"D:\\Logs\")){\n",
+                  "  New-Item -Path \"D:\\Logs\" -ItemType Directory\n",
+                  "}\n",
+                  "Write-Output (\">>>>>>>>>> Started create_cert_Jobs at: $(Get-Date -format 'u') >>>>>>>>>>\") | Out-File -Append $logFile\n",
+                  "$env:https_proxy = ''\n",
+                  "$S3BucketName = '",{"Ref":  "BucketName" },"' \n",
+                  "aws s3 cp s3://$S3BucketName/AWSInstanceDeployHub/scripts/certScripts/ C:\\vault --recursive --exclude \"*\" --include \"*Certificate*\" --no-progress | Out-File -Append $logFile \n",
+                  "aws s3 cp s3://$S3BucketName/AWSInstanceDeployHub/scripts/certScripts/ D:\\PowershellScripts --recursive --exclude \"*\" --include \"Cert*\" --no-progress | Out-File -Append $logFile \n",
+                  "Get-ChildItem D:\\PowershellScripts| Where-Object{$_.Name -like 'Cert*.sql'} | ForEach-Object{\n",
+                  "    $sqlfile = $_.FullName\n",
+                  "    try{ \n",
+                  "        Invoke-Sqlcmd -Database msdb -InputFile $sqlfile -QueryTimeout 30\n",
+                  "        Write-Output \"Deployed script file: $sqlfile... COMPLETED\"\n",
+                  "        Remove-Item -Path $sqlfile -Force\n",
+                  "    }\n",
+                  "    catch{ throw $_ }\n",
+                  "} \n",
+                  "Write-Output (\"<<<<<<<<<< Completed create_cert_Jobs at: $(Get-Date -format 'u') <<<<<<<<<<\") | Out-File -Append $logFile\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-createcertJobs" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\create_cert_Jobs.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "create_cert_Notification": {
+            "files":{
+              "C:\\cfn\\temp\\create_cert_Notification.ps1": {
+                "content": {"Fn::Join" : ["", [
+                  "$localFolder = 'D:\\PowershellScripts\\CertNotification' \n",
+                  "$runFile = 'D:\\PowershellScripts\\CertNotification\\Deploy-CFNCertNotification.ps1' \n",
+                  "$s3BucketName = '",{"Ref":  "BucketName" },"' \n",
+                  "$s3KeyPrefix = 'AWSInstanceDeployHub/scripts/certNotification' \n",
+                  "Read-S3Object -BucketName $s3BucketName -KeyPrefix $s3KeyPrefix -Folder $localFolder | Out-Null \n",
+                  ". $runFile \n",
+                  "cls \n",
+                  "Deploy-CFNCertNotification -Servers '",{ "Ref" : "AWS::StackName" },",",{"Fn::FindInMap" : ["AWSAccountID", {"Ref": "AWS::AccountId"}, "AccountName"]},"' \n"
+                  ]]}
+                }
+              },
+              "commands": {
+                "0-invoke-create_cert_Notification" :{
+                  "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\create_cert_Notification.ps1",
+                  "waitAfterCompletion" : "0"
+                }
+              }
+          },
+          "run_PostBuild_Scripts": {
+            "commands": {
+              "0-run-PostBuildScripts" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\run_postbuild_scripts.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "install_NewRelic": {
+            "commands": {
+              "0-install_NewRelic" :{
+                "command": { "Fn::Sub": [
+                  "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\install_NewRelic.ps1 -vault_namespace ${vault_namespace} -awsRegion ${awsRegion} -s3bucket ${s3bucket} -mssqlScriptsFolderName \"${mssqlScriptsFolderName}\" -NewRelicKey \"${NewRelicKey}\" -Envt ${Envt} -SQLPort ${SQLPort}",
+                  {
+                    "vault_namespace": {"Fn::FindInMap" : ["TemplateParamaters", "Vault", "NameSpace"]},
+                    "awsRegion": {"Fn::FindInMap" : ["VPC", {"Ref": "Environment" }, "awsRegion"]},
+                    "s3bucket": {"Ref":  "BucketName" },
+                    "mssqlScriptsFolderName": {"Fn::FindInMap" : [ "TemplateParamaters", "Module", "ModuleFolderName"]},
+                    "NewRelicKey": {"Fn::FindInMap" : ["VPC", {"Ref": "Environment" }, "NewRelicKey"]},
+                    "Envt": {"Ref": "Environment" },
+                    "SQLPort": {"Fn::FindInMap" : ["VPC", {"Ref": "Environment" }, "PortNumberForSQLServer"]}
+                  }
+                  ]},
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "enable_hadr": {
+            "files" : {
+              "C:\\cfn\\temp\\enable_hadr_setting.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "$Global:StackName = \"", { "Ref" : "AWS::StackName" }, "\" \n",
+                  "$Global:Region = \"", { "Ref" : "AWS::Region"}, "\" \n",
+                  "$Global:Proxy = \"", {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "HttpsProxyUrl"]}, "\" \n",
+                  "$Global:RoleType = \"", {"Ref" : "RoleType" }, "\" \n",
+                  "cd 'C:\\", {"Fn::FindInMap" : [ "TemplateParamaters", "Module", "ModuleFolderName"]}, "'\n",
+                  "./hadr_setting_configurator.ps1\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-enable_hadr" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\enable_hadr_setting.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "register_DB_to_SolarWinds": {
+            "files" : {
+              "C:\\cfn\\temp\\register_DB_to_SolarWinds.ps1": {
+                "content": {"Fn::Join" : ["", [
+                  "cd C:\\vault\n",
+                  ". .\\Get-VaultToken.ps1\n",
+                  ". .\\Get-VaultPassword.ps1\n",
+                  ". C:\\cfn\\temp\\saCred.ps1\n",
+                  "$Global:mssqlScriptsFolder=\"C:\\mssql-scripts\" \n",
+                  "cd $mssqlScriptsFolder \n",
+                  "$Global:logsFolder = \"$mssqlScriptsFolder\\automation_logs\"\n",
+                  "$timestamp = [int](Get-Date -UFormat %s -Millisecond 0)\n",
+                  "$Global:logFile = \"$logsFolder\\register_DB_to_Solarwinds_$timestamp.log\"\n",
+                  "aws s3 cp s3://",{"Ref":  "BucketName" },"/AWSInstanceDeployHub/scripts/DPA/DPA.zip C:\\cfn\\DPA.zip --quiet\n",
+                  "Expand-Archive C:\\cfn\\DPA.zip 'C:\\Program Files\\WindowsPowerShell\\Modules' -Force\n",
+                  "Remove-Item C:\\cfn\\DPA.zip\n",
+                  "import-module DPA -force\n",
+                  "$clusterName = '",{ "Ref" : "AWS::StackName" },"'\n",
+                  "$instanceName = $env:ComputerName \n",
+                  "$sqlPort = \"", {"Fn::FindInMap" : ["VPC", {"Ref": "Environment" }, "PortNumberForSQLServer"]}, "\" \n",
+                  "$microservicevalue = [System.Environment]::GetEnvironmentVariable('microservice')\n",
+                  "$vpc = \"", {"Fn::FindInMap" : [ "AWSAccountID", {"Ref": "AWS::AccountId"}, "AccountName"]}, "\" \n",
+                  "$solarwinds = \"", {"Fn::FindInMap" : ["AWSAccountID", {"Ref": "AWS::AccountId"}, "SolarwindsName"]}, "\" \n",
+                  "$sysAdminUser = \"sa\"; \n",
+                  "$sysAdminPassword = \"$($SAPassword)\"; \n",
+                  "$credential = New-Object System.Management.Automation.PSCredential ($sysAdminUser, (ConvertTo-SecureString -String $sysAdminPassword -AsPlainText -Force)) \n",
+                  "try { \n",
+                  " Register-DPAMonitor -solarwinds \"$solarwinds\" -monitorName \"$instanceName\" -clusterName \"$clusterName\" -microservice \"$microservicevalue\" -port $sqlPort -vpc \"$vpc\" -credential $credential -createMonitoringUser \n",
+                  "} catch [System.Net.WebException]{\n",
+                  " $respStream = $_.Exception.Response.GetResponseStream()\n",
+                  " $reader = New-Object System.IO.StreamReader($respStream)\n",
+                  " $respBody = $reader.ReadToEnd() \n",
+                  " $respBody;\n",
+                  " write-output \"Registration \"$instanceName\" to Solarwinds DPA - FAILED\" | Out-File -Append $logFile\n",
+                  " write-output \"[$respBody]\" | Out-File -Append $logFile\n",
+                  "}\n",
+                  "remove-module DPA\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-register-DB-to-Solarwinds": {
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\register_DB_to_SolarWinds.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "validate_server_compliance": {
+            "commands": {
+              "0-run-validateServerCompliance" :{
+                "command": {"Fn::Sub": [
+                  "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\mssql-scripts\\CFTemplateScripts\\validate_server_compliance.ps1 -templateAMI ${templateAMI} -Domain ${domain} -ConfigType ${ConfigType}",
+                  {"templateAMI": {"Fn::FindInMap" : [ "AWSAccountID", {"Ref": "AWS::AccountId"}, "ImageID" ]},
+                    "domain": {"Ref":"Environment"},
+                    "ConfigType": {"Ref":"ConfigType"}}
+                ]},
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "remove_creds": {
+            "files" : {
+              "C:\\cfn\\temp\\remove_creds.ps1": {
+                "content": { "Fn::Join" : ["", [
+                  "$Global:mssqlScriptsFolder=\"C:\\mssql-scripts\" \n",
+                  "cd $mssqlScriptsFolder \n",
+                  "$Global:logsFolder = \"$mssqlScriptsFolder\\automation_logs\"\n",
+                  "$timestamp = [int](Get-Date -UFormat %s -Millisecond 0)\n",
+                  "$Global:logFile = \"$logsFolder\\remove_creds_log_$timestamp.log\"\n",
+                  "Write-Output (\">>>>>>>>>> Started remove_creds at: $(Get-Date -format 'u') >>>>>>>>>>\") | Out-File -Append $logFile\n",
+                  "$files = Get-ChildItem \"C:\\cfn\\temp\\\"\n",
+                  "foreach ($f in $files){\n",
+                  "$scriptName = $f.FullName\n",
+                  "write-output \"Start removing password credentials from script [$scriptName]\" | Out-File -Append $logFile\n",
+                  "$credVarNames = @(\"SQLSAPwd\", \"password\", \"ClusAdminPwd\", \"SaSqlAcctPwd\", \"SaSqlAgentAcctPwd\", \"SAPassword\")\n",
+                  "foreach ($cred in $credVarNames) {\n",
+                  "$regex = '^\\$Global:' + [regex]::escape($cred) + ' = ' + '.+'\n",
+                  "$replaceString = '$Global:' + $cred + ' = \"XXXXXX\"'\n",
+                  "((Get-Content -Path $scriptName) | foreach-object {$_ -replace $regex, $replaceString})  | Set-Content -Path $scriptName\n",
+                  "}\n",
+                  "write-output \"End removing password credentials from script [$scriptName]\" | Out-File -Append $logFile\n",
+                  "}\n",
+                  "write-output (\"<<<<<<<<<< Completed remove_creds at: $(Get-Date -format 'u') <<<<<<<<<<\") | Out-File -Append $logFile\n"
+                ]]}
+              }
+            },
+            "commands": {
+              "0-invoke-removeCreds" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\remove_creds.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "LaunchTemplateData" : {
+          "BlockDeviceMappings" : [
+            {
+              "DeviceName" : "/dev/sda1",
+              "Ebs" : {
+                "DeleteOnTermination" : "true",
+                "VolumeType" : "gp3",
+                "VolumeSize": { "Fn::FindInMap" : [ "TemplateParamaters", "Disk" , "RootDiskSize"] },
+                "Encrypted": "true"
+              }
+            },
+            {
+              "DeviceName": "xvdd",
+              "Ebs": {
+                "DeleteOnTermination": "true",
+                "VolumeType" : "gp3",
+                "VolumeSize": {"Ref" : "DiskSizeOfDDrive" },
+                "Encrypted": "true"
+              }
+            },
+            {
+              "DeviceName" : "xvde",
+              "Ebs": {
+                "DeleteOnTermination": "true",
+                "VolumeType" : "gp3",
+                "VolumeSize": {"Ref" : "DiskSizeOfEDrive" },
+                "Iops" : { "Fn::If": ["IopsCond",3000,16000] },
+                "Throughput" : { "Fn::If": ["IopsCond",125,1000] },
+                "Encrypted": "true"
+              }
+            },
+            { "Fn::If": [
+              "HasNVMe",
+              {"Ref": "AWS::NoValue"},
+              {
+                "DeviceName" : "xvdf",
+                "Ebs": {
+                  "DeleteOnTermination": "true",
+                  "VolumeType" : "gp3",
+                  "VolumeSize": {"Ref" : "DiskSizeOfFDrive" },
+                  "Iops" : { "Fn::If": ["IopsCond",3000,16000] },
+                  "Throughput" : { "Fn::If": ["IopsCond",125,1000] },
+                  "Encrypted": "true"
+                }
+              }]
+            },
+            {
+              "DeviceName" : "xvdg",
+              "Ebs": {
+                "DeleteOnTermination": "true",
+                "VolumeType" : "gp3",
+                "VolumeSize": {"Ref" : "DiskSizeOfGDrive" },
+                "Iops" : { "Fn::If": ["IopsCond",3000,16000] },
+                "Throughput" : { "Fn::If": ["IopsCond",125,1000] },
+                "Encrypted": "true"
+              }
+            },
+            {
+              "DeviceName" : "xvdm",
+              "Ebs": {
+                "DeleteOnTermination": "true",
+                "VolumeType" : "gp3",
+                "VolumeSize": {"Ref" : "DiskSizeOfMDrive" },
+                "Iops" : { "Fn::If": ["IopsCond",3000,16000] },
+                "Throughput" : { "Fn::If": ["IopsCond",125,1000] },
+                "Encrypted": "true"
+              }
+            }
+          ],
+          "InstanceType" : { "Ref" : "InstanceType" },
+          "ImageId": {"Fn::FindInMap" : [ "AWSAccountID", {"Ref":  "AWS::AccountId"}, "ImageID"]},
+          "UserData" : {
+            "Fn::Base64" : {
+              "Fn::Join" : ["", [
+                "<powershell>\n",
+                { "Fn::Sub": [
+                  "if( \"${Domain}\" -eq \"INTEGRATION\" ) { \n",
+                  { "Domain":  {"Ref":  "Environment" } }
+                ]},
+                " C:\\Windows\\Temp\\Set-ProxyWindows.ps1 -ProxyServer proxy.service.cnqr.tech:3128 -ProxyServerOverride \"127.0.0.1;*service.consul;*.service.cnqr.tech;*.service.cnqr.io;169.254.169.254;169.254.169.253;169.254.169.251;169.254.169.250;169.254.169.249;169.254.169.123\" \n",
+                "} \n",
+                "New-Item C:\\cfn\\temp -ItemType Directory | Out-Null \n",
+                "Copy-Item C:\\Windows\\Temp\\accounts.json C:\\cfn\\temp\\accounts.json \n",
+                "(Get-Content C:\\Windows\\Temp\\bootstrap.ps1).replace('Restart-Computer','# Restart-Computer') | Set-Content C:\\Windows\\Temp\\bootstrap.ps1\n",
+                "C:\\Windows\\Temp\\bootstrap.ps1 \n",
+                "$userDataLogsFolder='C:\\user_data_logs' \n",
+                "$timestamp = [int](Get-Date -UFormat %s -Millisecond 0) \n",
+                "$logFile = $userDataLogsFolder + '\\user_data_log_' + $timestamp + '.log' \n",
+                "if ((Test-Path $userDataLogsFolder) -eq $false) { \n",
+                "  New-Item -ItemType 'directory' -Path $userDataLogsFolder \n",
+                "} \n",
+                "$TimeNow = Get-Date \n",
+                "Write-Output \"User Data process started at $TimeNow\" | Out-File -Append $logFile \n",
+                "$TimeNow = Get-Date \n",
+                "Write-Output \"User Data starting cfn-init application at $TimeNow\" | Out-File -Append $logFile \n",
+                "(Get-Content 'C:\\Windows\\Temp\\proxy_list.ps1').Replace('$pscc_','$uspscc_') | Set-Content C:\\cfn\\temp\\proxy_list.ps1 \n",
+                ". C:\\cfn\\temp\\proxy_list.ps1 \n",
+                { "Fn::Sub": ["$env:no_proxy = $${ENVT}_no_proxy\n",{ "ENVT":  {"Ref":  "Environment" } }]},
+                { "Fn::Sub": ["if( \"${Domain}\" -eq \"INTEGRATION\" ) { \n",{ "Domain":  {"Ref":  "Environment" } }]},
+                { "Fn::Sub": [
+                  " cfn-init.exe -v -c mssql_provisioning -s '${AWS::StackName}' -r 'MssqlServerLaunchTemplate' --region '${AWS::Region}' --https-proxy '${HttpsProxyUrl}' \n",
+                  { "HttpsProxyUrl": {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "HttpsProxyUrl"]}}
+                ]},
+                "} else { \n",
+                { "Fn::Sub": [
+                  " cfn-init.exe -v -c mssql_provisioning -s '${AWS::StackName}' -r 'MssqlServerLaunchTemplate' --region '${AWS::Region}' \n",
+                  { "HttpsProxyUrl": {"Fn::FindInMap" : [ "VPC", { "Ref": "Environment" }, "HttpsProxyUrl"]}}
+                ]},
+                "} \n",
+                "$TimeNow = Get-Date \n",
+                "Write-Output \"CFN init completed at $TimeNow\" | Out-File -Append $logFile \n",
+                "Write-Output \"CFN init exited with $?\" | Out-File -Append $logFile \n",
+                "</powershell>\n"
+              ]]
+            }
+          },
+          "TagSpecifications" : [
+            {
+              "ResourceType": "instance",
+              "Tags" : [
+                { "Key": "Name", "Value": { "Ref": "AWS::StackName" } },
+                { "Key" : "RoleType", "Value" : { "Ref": "RoleType" } },
+                { "Key" : "SQLListenerCName", "Value" : { "Ref": "NameOfCRecordForListener" } },
+                { "Key" : "Team", "Value" : "DBA" },
+                { "Key" : "Owner", "Value" : "iops-db@sap.com" },
+                { "Key" : "IsDomainAttached", "Value" : "Yes" },
+                { "Key" : "ConfigType", "Value" : { "Ref": "ConfigType" } }
+              ]
+            },
+            {
+              "ResourceType": "volume",
+              "Tags" : [
+                { "Key" : "RoleType", "Value" : { "Ref": "RoleType" } },
+                { "Key" : "Team", "Value" : "DBA" },
+                { "Key" : "Owner", "Value" : "iops-db@sap.com" }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "Master": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "IamInstanceProfile": {"Fn::ImportValue" : "MSSQLOpsInstanceProfile"},
+        "NetworkInterfaces" : [{
+          "NetworkInterfaceId": { "Ref" : "MasterNetworkInterface"},
+          "DeviceIndex" : "0"
+        }],
+        "LaunchTemplate": {
+          "LaunchTemplateId": {"Ref":  "MssqlServerLaunchTemplate"},
+          "Version": {"Fn::GetAtt": ["MssqlServerLaunchTemplate", "LatestVersionNumber"]}
+        },
+        "DisableApiTermination" : { "Fn::If": [
+          "PRODUCTION",
+          "true",
+          "false"
+        ]
+        }
+      }
+    },
+    "Worker1": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "IamInstanceProfile": {"Fn::ImportValue" : "MSSQLOpsInstanceProfile"},
+        "NetworkInterfaces" : [{
+          "NetworkInterfaceId": { "Ref" : "Worker1NetworkInterface"},
+          "DeviceIndex" : "0"
+        }] ,
+        "LaunchTemplate": {
+          "LaunchTemplateId": {"Ref":  "MssqlServerLaunchTemplate"},
+          "Version": {"Fn::GetAtt": ["MssqlServerLaunchTemplate", "LatestVersionNumber"]}
+        },
+        "DisableApiTermination" : { "Fn::If": [
+          "PRODUCTION",
+          "true",
+          "false"
+        ]
+        }
+      }
+    },
+    "Worker2": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "IamInstanceProfile": {"Fn::ImportValue" : "MSSQLOpsInstanceProfile"},
+        "NetworkInterfaces" : [{
+          "NetworkInterfaceId": { "Ref" : "Worker2NetworkInterface"},
+          "DeviceIndex" : "0"
+        }] ,
+        "LaunchTemplate": {
+          "LaunchTemplateId": {"Ref":  "MssqlServerLaunchTemplate"},
+          "Version": {"Fn::GetAtt": ["MssqlServerLaunchTemplate", "LatestVersionNumber"]}
+        },
+        "DisableApiTermination" : { "Fn::If": [
+          "PRODUCTION",
+          "true",
+          "false"
+        ]
+        }
+      }
+    },
+    "MssqlServerInstallWaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : ["Master","Worker1", "Worker2"],
+      "CreationPolicy" : {
+        "ResourceSignal" : {
+          "Timeout" : "PT90M",
+          "Count" : "3"
+        }
+      }
+    },
+    "ClusterCreationWaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : ["MssqlServerInstallWaitCondition"],
+      "CreationPolicy" : {
+        "ResourceSignal" : {
+          "Timeout" : "PT90M",
+          "Count" : "1"
+        }
+      }
+    },
+    "PostBuildWaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : ["ClusterCreationWaitCondition"],
+      "CreationPolicy" : {
+        "ResourceSignal" : {
+          "Timeout" : "PT90M",
+          "Count" : "1"
+        }
+      }
+    },
+    "MasterNetworkInterface": {
+      "Type": "AWS::EC2::NetworkInterface",
+      "DependsOn" : ["CFNCheckStackConditions"],
+      "Properties": {
+        "GroupSet" : [{"Fn::ImportValue" : "dbsqlSG" },{"Fn::ImportValue" : "DefaultSecurityGroupId" }],
+        "SecondaryPrivateIpAddressCount": 2,
+        "SubnetId": {"Fn::ImportValue" : "DbSubnet1Id" },
+        "Tags" : [
+          { "Key" : "RoleType", "Value" : { "Ref": "RoleType" } },
+          { "Key" : "Team", "Value" : "DBA" },
+          { "Key" : "Owner", "Value" : "iops-db@sap.com" }
+        ]
+      }
+    },
+    "Worker1NetworkInterface": {
+      "Type": "AWS::EC2::NetworkInterface",
+      "DependsOn" : ["CFNCheckStackConditions"],
+      "Properties": {
+        "GroupSet" : [{"Fn::ImportValue" : "dbsqlSG" },{"Fn::ImportValue" : "DefaultSecurityGroupId" }],
+        "SecondaryPrivateIpAddressCount": 2,
+        "SubnetId": {"Fn::ImportValue" : "DbSubnet2Id" },
+        "Tags" : [
+          { "Key" : "RoleType", "Value" : { "Ref": "RoleType" } },
+          { "Key" : "Team", "Value" : "DBA" },
+          { "Key" : "Owner", "Value" : "iops-db@sap.com" }
+        ]
+      }
+    },
+    "Worker2NetworkInterface": {
+      "Type": "AWS::EC2::NetworkInterface",
+      "DependsOn" : ["CFNCheckStackConditions"],
+      "Properties": {
+        "GroupSet" : [{"Fn::ImportValue" : "dbsqlSG" },{"Fn::ImportValue" : "DefaultSecurityGroupId" }],
+        "SecondaryPrivateIpAddressCount": 2,
+        "SubnetId": {"Fn::ImportValue" : "DbSubnet3Id"},
+        "Tags" : [
+          { "Key" : "RoleType", "Value" : { "Ref": "RoleType" } },
+          { "Key" : "Team", "Value" : "DBA" },
+          { "Key" : "Owner", "Value" : "iops-db@sap.com" }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "Master": {
+      "Value": { "Fn::Join": [", ", [
+        {"Fn::GetAtt": ["Master", "PrivateDnsName"]}
+      ]]}
+    },
+    "Worker1": {
+      "Value": { "Fn::Join": [", ", [
+        {"Fn::GetAtt": ["Worker1", "PrivateDnsName"]}
+      ]]}
+    },
+    "Worker2": {
+      "Value": { "Fn::Join": [", ", [
+        {"Fn::GetAtt": ["Worker2", "PrivateDnsName"]}
+      ]]}
+    },
+    "Environment": {
+      "Value": { "Ref": "Environment" }
+    },
+    "TemplateVersion": {
+      "Value": { "Fn::FindInMap" : [ "Version", "Template", "TemplateVersion"] }
+    },
+    "ModuleVersion": {
+      "Value": { "Fn::FindInMap" : [ "Version", "Module", "ModuleVersion"] }
+    }
+  }
+}

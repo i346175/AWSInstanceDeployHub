@@ -1,0 +1,443 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Solarwinds DPA v3.7
+Parameters:
+  Action:
+    Description: "Decides if template should be deployed with CloudFormation or just stored to S3 Bucket"
+    Type: String
+    AllowedValues: 
+      - Deploy
+      - S3Bucket
+      - ScheduleDeploy
+      - ScheduleDeployTest
+  Account:
+    Description: "Current account"
+    Type: String
+    AllowedValues:
+      - integration-tools
+      - us2-tools
+      - eu2-tools
+      - uspscc-tools
+      - apj1-tools
+  BucketName:
+    Description: "Name of the S3 bucket to store the template"
+    Type: String
+  Scope:
+    Type: String
+    Default: central
+    AllowedValues:
+      - reporting
+      - spend
+      - travel
+      - central
+      - test
+  S3ScriptsPath:
+    Description: "Path to the S3 bucket where scripts will be stored"
+    Type: String
+  InstanceType:
+    Type: String
+    Default: r5.2xlarge
+    AllowedValues:
+      - r5.2xlarge
+      - r5.xlarge
+  DiskSize:
+    Type: Number
+    Default: 150
+    MinValue: 100
+    MaxValue: 1000
+    ConstraintDescription: Must be between a numeric value in gigabytes [between 100 to 1000]. Default is 150.
+    Description: Disk size for the root volume
+Mappings:
+  AllowedAccounts:
+    integration-tools:
+      Environment: integration
+      HttpsProxyUrl: http://proxy.service.cnqr.tech:3128
+      PrivateHostedZoneName: tools.cnqr.tech
+      PrivateHostedZoneID: Z12X26TPAFQYDI
+      PortNumberForSQLServer: '2020'
+      AMIID: '{{resolve:ssm:/golden-ami/rhel8/stig/fips/latest}}'
+    us2-tools:
+      Environment: us2
+      HttpsProxyUrl: http://proxy.service.cnqr.tech:3128
+      PrivateHostedZoneName: tools.cnqr.tech
+      PrivateHostedZoneID: Z038537230K84WY49CJUW
+      PortNumberForSQLServer: '2040'
+      AMIID: '{{resolve:ssm://concur-console-image-factory/impact/dbsqlRHEL/PROD}}'
+    eu2-tools:
+      Environment: eu2
+      HttpsProxyUrl: http://proxy.service.cnqr.tech:3128
+      PrivateHostedZoneName: tools.cnqr.tech
+      PrivateHostedZoneID: Z0789300SQ1YO3KCMSHS
+      PortNumberForSQLServer: '2050'
+      AMIID: '{{resolve:ssm:/concur-console-image-factory/impact/dbsqlRHEL/PROD}}'
+    uspscc-tools:
+      Environment: uspscc
+      HttpsProxyUrl: http://proxy.service.cnqr.tech:3128
+      PrivateHostedZoneName: tools.cnqr.tech
+      PrivateHostedZoneID: Z08116541I2QY2I1FAD89
+      PortNumberForSQLServer: '2020'
+      AMIID: ami-08f69a488f272cc28
+    apj1-tools:
+      Environment: apj1
+      HttpsProxyUrl: http://proxy.service.cnqr.tech:3128
+      PrivateHostedZoneName: tools.cnqr.tech
+      PrivateHostedZoneID: Z08266841RK13ZYG6ONNV
+      PortNumberForSQLServer: '2060'
+      AMIID: '{{resolve:ssm:/concur-console-image-factory/impact/dbsqlRHEL/PROD}}'
+  VPC:
+    Subnet:
+      zoneA: DbSubnet1Id
+      zoneB: DbSubnet2Id
+      zoneC: DbSubnet3Id
+Resources:
+  SolarwindsLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          config:
+            - invoke_storage_config
+            - setup_linux
+            - setup_folders
+            - prepare_installation
+            - install_DPA
+            - dpaservice_autostart
+            - signal_complete
+        invoke_storage_config:
+          files:
+            /tmp/invoke_storage_config.sh:
+              content: |
+                #!/bin/bash
+                # Prints each command out while running
+                set -x
+                echo Starting storage configuration
+                lsblk
+
+                ROOT_DISK=/dev/nvme0n1
+                ROOT_PARTITION=/dev/nvme0n1p4
+                ROOT_VG=rootvg
+                APP_LV=solwlv
+                APP_MOUNTPOINT=/opt/solw
+
+                echo Extending root partition...
+                growpart $ROOT_DISK 4
+                pvresize $ROOT_PARTITION
+
+                echo Creating application partition...
+                lvcreate -l +100%FREE -n $APP_LV $ROOT_VG
+                mkfs.xfs /dev/$ROOT_VG/$APP_LV
+                mkdir -p $APP_MOUNTPOINT
+                echo "/dev/mapper/$ROOT_VG-$APP_LV $APP_MOUNTPOINT xfs defaults 0 0" >> /etc/fstab
+                mount -a
+                systemctl daemon-reload
+                lsblk
+                sleep 30
+                echo Storage configuration completed
+              
+              mode: "000755"
+              owner: "root"
+              group: "root"
+          commands:
+            0-invoke_storage_config:
+              command: 'sh /tmp/invoke_storage_config.sh > /tmp/invoke_storage_config.log 2>&1'
+              ignoreErrors: 'false'
+        setup_linux:
+          files:
+            /tmp/iptables.sh:
+              content: 
+                'Fn::Sub':
+                  - |
+                    #!/bin/bash -e
+                    set -x
+                    echo Starting iptables configuration
+                    iptables -A OUTPUT -p tcp -m state --state NEW -m tcp --dport 443 -j ACCEPT; 
+                    iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 443 -j ACCEPT; 
+                    iptables -A OUTPUT -p tcp -m state --state NEW -m tcp --dport 3306 -j ACCEPT; 
+                    iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 3306 -j ACCEPT; 
+                    iptables -A OUTPUT -p tcp -m state --state NEW -m tcp --dport 636 -j ACCEPT; 
+                    iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport 636 -j ACCEPT; 
+                    iptables -A OUTPUT -p tcp -m state --state NEW -m tcp --dport 587 -j ACCEPT; 
+                    iptables -A INPUT -p tcp -m state --state NEW -m tcp --dport ${PortNumberForSQLServer} -j ACCEPT; 
+                    iptables -A OUTPUT -p tcp -m state --state NEW -m tcp --dport ${PortNumberForSQLServer} -j ACCEPT; 
+                    service iptables save; 
+                  - PortNumberForSQLServer: !FindInMap [AllowedAccounts, !Ref 'Account', PortNumberForSQLServer]
+              mode: '000755'
+              owner: root
+              group: root
+            /tmp/open_files.sh:
+              content: |
+                #!/bin/bash -e
+                set -x
+                echo Starting open files configuration
+                echo "root hard nofile 1048576" >> /etc/security/limits.conf; 
+                echo "root soft nofile 1048576" >> /etc/security/limits.conf; 
+
+              mode: '000755'
+              owner: root
+              group: root
+            /tmp/settags.sh:
+              content: |
+                #!/bin/bash -e
+                set -x
+                echo Starting setting system Tags
+                echo "patch-schedule-weekly-Friday-noreboot" >> /opt/Tanium/TaniumClient/Tools/CustomTags.txt; 
+                echo "deploy-newrelic-updates" >> /opt/Tanium/TaniumClient/Tools/CustomTags.txt; 
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            0-invoke-iptables:
+              command: sudo sh /tmp/iptables.sh > /tmp/iptables.log 2>&1
+              ignoreErrors: 'false'
+            1-invoke-open_files:
+              command: sudo sh /tmp/open_files.sh > /tmp/open_files.log 2>&1
+              ignoreErrors: 'false'
+            2-invoke-taniumtag:
+              command: sudo sh /tmp/settags.sh > /tmp/settags.log 2>&1
+              ignoreErrors: 'false'
+        setup_folders:
+          files:
+            /tmp/setup_folders.sh:
+              content: |
+                #!/bin/bash –e
+                set -x
+                echo Starting folder creations
+                mkdir -p /opt/solw/automation; 
+                chmod 755 /opt/solw/automation; 
+              mode: '000755'
+              owner: root
+              group: root
+          commands: 
+            0-setup-folders:
+              command: sudo sh /tmp/setup_folders.sh > /tmp/setup_folders.log 2>&1
+              ignoreErrors: 'false'
+        prepare_installation:
+          files:
+            /tmp/prepare_installation.sh:
+              content:
+                'Fn::Sub':
+                  - |
+                    #!/bin/bash
+                    set -x
+                    export https_proxy=''
+                    export BUCKET_NAME="${BucketName}"
+                    export SCRIPTS_PATH="${S3ScriptsPath}"
+                    export PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin:$PATH
+                    echo Starting preparation for Solarwinds DPA installation
+                    yum install -y expect
+                    yum install -y urw-base35-fonts
+                    DPAinstaller=$(aws s3 ls s3://$BUCKET_NAME/$SCRIPTS_PATH/Solarwinds/installer/  | sort | tail -n 1 | awk '{print $4}')
+                    aws s3 cp s3://$BUCKET_NAME/$SCRIPTS_PATH/Solarwinds/installer/$DPAinstaller /opt/solw --no-progress
+                    aws s3 cp s3://$BUCKET_NAME/$SCRIPTS_PATH/Solarwinds/automation/install.sh /opt/solw/automation --no-progress
+                    aws s3 cp s3://$BUCKET_NAME/$SCRIPTS_PATH/Solarwinds/automation/install.exp /opt/solw/automation --no-progress
+                    chmod +x /opt/solw/automation -R
+                  - BucketName: !Ref BucketName
+                    S3ScriptsPath: !Ref S3ScriptsPath
+
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            0-prepare_installation:
+              command: sudo sh /tmp/prepare_installation.sh > /tmp/prepare_installation.log 2>&1
+              ignoreErrors: 'false'
+        install_DPA:
+          files:
+            /tmp/install_DPA.sh:
+              content:
+                 'Fn::Sub':
+                    - |
+                      #!/bin/bash
+                      set -x
+                      export BUCKET_NAME="${BucketName}"
+                      export SCRIPTS_PATH="${S3ScriptsPath}"
+                      export PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin:$PATH
+                      cd /opt/solw/automation
+                      export version=$(ls /opt/solw -t | grep SolarWinds | head -1 | cut -d '-' -f 3)
+                      export Underscoredversion="dpa_$(echo $version | tr '.' '_')"
+                      ./install.sh i $version
+                      aws s3 cp s3://$BUCKET_NAME/$SCRIPTS_PATH/Solarwinds/configuration/server.xml /opt/solw/$Underscoredversion/iwc/tomcat/conf --no-progress
+                      echo "java.min.heap.size=8196m" >> /opt/solw/$Underscoredversion/iwc/tomcat/ignite_config/idc/server.properties
+                      echo "java.max.heap.size=16384m" >> /opt/solw/$Underscoredversion/iwc/tomcat/ignite_config/idc/server.properties
+                      echo -e "\nuser.timezone=US/Pacific\n" >> /opt/solw/$Underscoredversion/iwc/tomcat/ignite_config/idc/system.properties
+                    - BucketName: !Ref BucketName
+                      S3ScriptsPath: !Ref S3ScriptsPath
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            0-install_DPA:
+              command: sudo sh /tmp/install_DPA.sh > /tmp/install_DPA.log 2>&1
+              ignoreErrors: 'false'
+        dpaservice_autostart:
+          files:
+            /tmp/dpaservice_autostart.sh:
+              content: |
+                  #!/bin/bash
+
+                  # Prints each command out while running
+                  set -e
+                  set -o pipefail
+
+                  export PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin:$PATH 
+
+                  echo Starting setting for Solarwinds DPA service autostart
+
+                  export version=$(ls /opt/solw -t | grep SolarWinds | head -1 | cut -d '-' -f 3)
+                  export Underscoredversion=dpa_${version//./_} 
+
+                  sudo touch /etc/systemd/system/dpa.service
+                  sudo bash -c "cat > /etc/systemd/system/dpa.service << EOL
+                  [Unit]
+                  Description=DPA Service
+                  After=dbus.service syslog.target network.target
+
+                  [Service]
+                  Type=forking
+                  User=root
+                  ExecStart=/bin/bash /opt/solw/${Underscoredversion}/startup.sh
+                  ExecStop=/bin/bash /opt/solw/${Underscoredversion}/shutdown.sh
+                  Restart=on-failure
+
+                  [Install]
+                  WantedBy=multi-user.target
+                  EOL"
+                  sudo systemctl daemon-reload
+                  sudo systemctl enable dpa.service
+                  sudo systemctl start dpa.service    
+              mode: '000755'
+              owner: root
+              group: root
+          commands:
+            0-dpaservice_autostart:
+              command: sudo sh /tmp/dpaservice_autostart.sh > /tmp/dpaservice_autostart.log 2>&1
+              ignoreErrors: 'false'
+        signal_complete:
+          commands:
+            01-signal-resource:
+              command: !Join
+                - ''
+                - - /usr/local/bin/cfn-signal -e $?
+                  - ' --resource Solarwinds --stack '
+                  - Ref: 'AWS::StackName'
+                  - ' --region '
+                  - Ref: 'AWS::Region'
+    Properties:
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: /dev/sda1
+            Ebs:
+              VolumeType: gp3
+              VolumeSize: !Ref DiskSize
+              Encrypted: 'true'
+        InstanceType: !Ref InstanceType
+        ImageId: !FindInMap [AllowedAccounts, !Ref 'Account', AMIID]
+        UserData:
+          Fn::Base64: 
+            Fn::Sub:
+              - |
+                #!/bin/bash 
+                set -ex
+                # redirect user-data script output to user-data.log as well as to /dev/console
+                exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+                echo "Starting user data script"
+                sudo su -
+                AWS_INSTANCE_ID=`curl http://169.254.169.254/latest/meta-data/instance-id`
+                /usr/local/bin/aws ec2 modify-instance-metadata-options --instance-id $AWS_INSTANCE_ID --http-tokens required --http-endpoint enabled
+                # Reset the password policy for root to remove expiry.
+                chage -I -1 -m 0 -M 99999 -E -1 root    
+                export HOME=/root # the python bootstrap fails without this ?\_(?)_/?
+                export https_proxy=http://proxy.service.cnqr.tech:3128
+                export http_proxy=http://proxy.service.cnqr.tech:3128
+                export no_proxy=localhost,127.0.0.1,.concurasp.com,.cnqr.delivery,.emea.api.concursolutions.com,.us.api.concursolutions.com,.cnqr.tech,.cnqr-cn.com,.api.concurcdc.cn,.service.cnqr.tech,.service.consul,169.254.169.254,s3.${Region}.amazonaws.com,ec2.${Region}.amazonaws.com,.${Region}.eks.amazonaws.com,secretsmanager.${Region}.amazonaws.com,sts.${Region}.amazonaws.com,cloudformation.${Region}.amazonaws.com,.${Region}.elb.amazonaws.com
+                
+                #### Add certs
+                ln -sf /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem
+                curl https://ca.service.cnqr.tech/v1/trust/bundle.crt > /etc/pki/ca-trust/source/anchors/bundle.crt
+                update-ca-trust extract
+
+                ### Fix AWS-CLI permissions
+                chmod -R 755 /usr/local/aws-cli
+
+                echo "Running cfn-init"
+                if ! /usr/local/bin/cfn-init -v --stack ${StackName} --resource SolarwindsLaunchTemplate --configsets config --region ${Region}; then
+                  echo "Failed to run cfn-init" >&2
+                  exit 1
+                fi
+                echo "User data script completed"
+              - StackName: !Ref "AWS::StackName"
+                Region: !Ref "AWS::Region"
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Ref 'AWS::StackName'
+              - Key: RoleType
+                Value: solw
+              - Key: Role
+                Value: SolarwindsDPA
+          - ResourceType: volume
+            Tags:
+              - Key: RoleType
+                Value: solw
+  Solarwinds:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT10M
+    Properties:
+      IamInstanceProfile: !ImportValue SolwOpsInstanceProfile
+      DisableApiTermination: 'true'
+      NetworkInterfaces:
+        - NetworkInterfaceId: !Ref MasterNetworkInterface
+          DeviceIndex: '0'
+      LaunchTemplate:
+        LaunchTemplateId: !Ref SolarwindsLaunchTemplate
+        Version: !GetAtt [SolarwindsLaunchTemplate, LatestVersionNumber]
+  MasterNetworkInterface:
+    Type: AWS::EC2::NetworkInterface
+    Properties:
+      GroupSet:
+        - !ImportValue SolwSG
+        - !ImportValue DefaultSecurityGroupId
+      SecondaryPrivateIpAddressCount: 0
+      SubnetId: !ImportValue
+        'Fn::FindInMap':
+          - VPC
+          - Subnet
+          - zoneC
+      Tags:
+        - Key: RoleType
+          Value: solw
+  DNSRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !FindInMap [AllowedAccounts, !Ref 'Account', PrivateHostedZoneID]
+      Comment: DNS name for Solarwinds-DPA
+      Name: !Join
+        - ''
+        - - Solarwinds-
+          - Ref: Scope
+          - .
+          - !FindInMap [AllowedAccounts, !Ref 'Account', PrivateHostedZoneName]
+      Type: CNAME
+      TTL: 300
+      ResourceRecords:
+        - !GetAtt [Solarwinds, PrivateDnsName]
+Outputs:
+  CNAME:
+    Description: CNAME connecting string for Solarwinds DPA
+    Value: !Join
+      - ''
+      - - 'https://Solarwinds-'
+        - Ref: Scope
+        - '.'
+        - !FindInMap [AllowedAccounts, !Ref 'Account', PrivateHostedZoneName]
+  IPconnection:
+    Description: IP connecting string for Solarwinds-DPA (use for connection from desktop)
+    Value: !Join
+      - ''
+      - - 'https://'
+        - !GetAtt [Solarwinds, PrivateIp]
+  PostBuild:
+    Description: Follow post-build DPA actions
+    Value: 'https://wiki.concur.com/confluence/display/INFOPS/How+to+build+Solarwinds+using+Cloudformation+template'

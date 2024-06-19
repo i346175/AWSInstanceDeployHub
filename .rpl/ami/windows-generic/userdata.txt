@@ -1,0 +1,17 @@
+<powershell>
+write-output "Running User Data Script"
+
+# Setup WinRM
+write-output "Setting up WinRM"
+$url = "https://raw.githubusercontent.com/ansible/ansible-documentation/devel/examples/scripts/ConfigureRemotingForAnsible.ps1"
+$ansible_script = "$PSScriptRoot\ConfigureRemotingForAnsible.ps1"
+Invoke-WebRequest -Uri $url -OutFile $ansible_script
+Invoke-Expression $ansible_script
+
+# Setup Firewall for WinRM
+write-output "Setting up Firewall for WinRM"
+cmd.exe /c netsh advfirewall firewall set rule group="Windows Remote Management" new enable=yes
+cmd.exe /c netsh advfirewall firewall add rule name="WinRM-HTTPS" dir=in localport=5986 protocol=TCP action=allow
+cmd.exe /c netsh advfirewall firewall add rule name="WinRM-HTTP" dir=in localport=5985 protocol=TCP action=allow
+cmd.exe /c sc config winrm start= auto
+</powershell>

@@ -1,0 +1,46 @@
+# Overview
+#
+# This file is used to configure your build environment and run your build commands
+# and scripts.
+# https://wiki.concur.com/confluence/display/CSS/Deployment+Environments+-+Release+Pipeline
+# Usage
+#
+#   - Define requirements for your build environment
+#   - Install any required tools or packages
+#   - Run any build commands or scripts to build your project
+#   - Promote your artifact using the supply-chain CLI to the deployment environment(s) defined in TARGET_ENVS
+#  More Information:
+#
+#  - AWS buildspec.yml - https://docs.aws.amazon.com/codebuild/latest/userguide/build-spec-ref.html
+#  - supply-chain CLI - https://github.concur.com/ktg/supply-chain#readme
+
+version: 0.2
+env:
+  shell: bash
+  variables:
+    ORG: impact
+    REPO: AWSEnvDeployHub
+    ROLETYPE: dbsql
+    PROMOTIONS_BUCKET: "cdc-build-sync-bucket-test"
+  secrets-manager:
+    GIT_TOKEN: impact/GenericToken
+phases:
+  install:
+    commands:
+      - chmod -R u+x .rpl/scripts/buildspec/* .rpl/ami/*
+      - env
+      - .rpl/scripts/buildspec/buildspec_initiator.sh ${CODEBUILD_INITIATOR} "install"
+  pre_build:
+    on-failure: ABORT
+    commands:
+      - .rpl/scripts/buildspec/buildspec_initiator.sh ${CODEBUILD_INITIATOR} "pre_build"
+  build:
+    on-failure: ABORT
+    commands:
+      - .rpl/scripts/buildspec/buildspec_initiator.sh ${CODEBUILD_INITIATOR} "build"
+  post_build:
+    on-failure: ABORT
+    commands:
+      - .rpl/scripts/buildspec/buildspec_initiator.sh ${CODEBUILD_INITIATOR} "post_build"
+    finally: 
+      - .rpl/scripts/buildspec/buildspec_initiator.sh ${CODEBUILD_INITIATOR} "finally"

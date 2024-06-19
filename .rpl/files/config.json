@@ -1,0 +1,229 @@
+{
+    "ORG": "impact",
+    "ROLE_TYPE": "dbsql",
+    "PROMOTIONS_BUCKET": "cdc-build-sync-bucket-test",
+    "TEMPLATES_FOLDER": "templates",
+    "SCRIPTS_FOLDER": "scripts",
+    "SCRIPTS_FULL_UPLOAD": "true",
+    "SLACK": {
+        "SLACK_CHANNEL": "#notify_dba",
+        "SLACK_HOOK": "https://hooks.slack.com/services/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"
+    },
+    "STACKTODELETE": ["MSSQLSSM-SSMDocumentName"],
+    "MULTISTACK": ["MSSQLEC2-DBAWKS-Domain","SOLWRDS-SOLW","SolwEC2-SOLW-DPA","MSSQLEC2-DBSQL-Domain-1node","MSSQLEC2-DBSQL-Domain-2node","MSSQLEC2-DBSQL-Domain-3node"],
+    "SCHEDULE":{
+        "dbsqlAMIIntBuild": {
+            "TYPE": "buildAMI"
+        },
+        "solwAMIIntBuild": {
+            "TYPE": "buildAMI"
+        },
+        "dbsqlAMIPromote": {
+            "TYPE": "promoteAMI"
+        },
+        "dbawksDeploy": {
+            "TYPE": "buildTemplate"
+        },
+        "dbawksDeployProd": {
+            "TYPE": "buildTemplate"
+        },
+        "dbsqlAMIIntTest": {
+            "TYPE": "buildTemplate"
+        }
+    },
+    "BRANCH":{
+        "pre-release": {
+            "TARGET_ENVS": "integration",
+            "ENVIRONMENT": "INTEGRATION"
+        },
+        "main": {
+            "TARGET_ENVS": "us2,eu2,us-pscc,apj1",
+            "ENVIRONMENT": "PRODUCTION"
+        },
+        "us-pscc": {
+            "TARGET_ENVS": "us-pscc",
+            "ENVIRONMENT": "US-PSCC"
+        }
+    },
+    "ENVIRONMENT": {
+        "integration": {
+            "region": "us-west-2",
+            "bucket_name": "",
+            "default_account": "integration-tools"           
+        },
+        "us2": {
+            "region": "us-west-2",
+            "bucket_name": "",
+            "default_account": "us2-tools"
+        },
+        "eu2": {
+            "region": "eu-central-1",
+            "bucket_name": "",
+            "default_account": "eu2-tools"
+        },
+        "uspscc": {
+            "region": "us-gov-west-1",
+            "bucket_name": "",
+            "default_account": "uspscc-tools"
+            
+        },
+        "apj1": {
+            "region": "ap-northeast-1",
+            "bucket_name": "",
+            "default_account": "apj1-tools"      
+        }
+        
+    },
+    "ACCOUNT": {
+        "integration-imaging": {
+            "account_name": "imaging",
+            "environment": "integration",
+            "account_id": "671578238862"
+        },
+        "integration-travel": {
+            "account_name": "travel",
+            "environment": "integration",
+            "account_id": "017656337997"
+        },
+        "integration-front": {
+            "account_name": "front",
+            "environment": "integration",
+            "account_id": "979224746709"
+        },
+        "integration-tools": {
+            "account_name": "tools",
+            "environment": "integration",
+            "account_id": "957236237862"
+        },
+        "integration-spend": {
+            "account_name": "spend",
+            "environment": "integration",
+            "account_id": "468669635168"
+        },
+        "integration-report": {
+            "account_name": "report",
+            "environment": "integration",
+            "account_id": "501939023848"
+        },
+        "integration-licensemanager": {
+            "account_name": "licensemanager",
+            "environment": "integration",
+            "account_id": "584560735166"
+        },
+        "us2-travel": {
+            "account_name": "travel",
+            "environment": "us2",
+            "account_id": "410945943071"
+        },
+        "us2-front": {
+            "account_name": "front",
+            "environment": "us2",
+            "account_id": "726167180837"
+        },
+        "us2-tools": {
+            "account_name": "tools",
+            "environment": "us2",
+            "account_id": "750800039034"
+        },
+        "us2-reportmigration": {
+            "account_name": "reportmigration",
+            "environment": "us2",
+            "account_id": "413688005887"
+        },
+        "us2-report": {
+            "account_name": "report",
+            "environment": "us2",
+            "account_id": "420207302444"
+        },
+        "us2-spend": {
+            "account_name": "spend",
+            "environment": "us2",
+            "account_id": "162751625961"
+        },
+        "eu2-travel": {
+            "account_name": "travel",
+            "environment": "eu2",
+            "account_id": "183676229290"
+        },
+        "eu2-front": {
+            "account_name": "front",
+            "environment": "eu2",
+            "account_id": "740915620366"
+        },
+        "eu2-tools": {
+            "account_name": "tools",
+            "environment": "eu2",
+            "account_id": "279778316745"
+        },
+        "eu2-reportmigration": {
+            "account_name": "reportmigration",
+            "environment": "eu2",
+            "account_id": "724191440523"
+        },
+        "eu2-report": {
+            "account_name": "report",
+            "environment": "eu2",
+            "account_id": "267203563179"
+        },
+        "eu2-spend": {
+            "account_name": "spend",
+            "environment": "eu2",
+            "account_id": "515680752897"
+        },
+        "uspscc-travel": {
+            "account_name": "travel",
+            "environment": "uspscc",
+            "account_id": "279767731023"
+        },
+        "uspscc-front": {
+            "account_name": "front",
+            "environment": "uspscc",
+            "account_id": "277336960726"
+        },
+        "uspscc-tools": {
+            "account_name": "tools",
+            "environment": "uspscc",
+            "account_id": "271931939120"
+        },
+        "uspscc-imaging": {
+            "account_name": "imaging",
+            "environment": "uspscc",
+            "account_id": "279622567726"
+        },
+        "uspscc-report": {
+            "account_name": "report",
+            "environment": "uspscc",
+            "account_id": "277311640285"
+        },
+        "uspscc-spend": {
+            "account_name": "spend",
+            "environment": "uspscc",
+            "account_id": "279762448776"
+        },
+        "apj1-tools": {
+            "account_name": "tools",
+            "environment": "apj1",
+            "account_id": "572574059774"
+        },
+        "apj1-travel": {
+            "account_name": "travel",
+            "environment": "apj1",
+            "account_id": "238321242042"
+        },
+        "apj1-report": {
+            "account_name": "report",
+            "environment": "apj1",
+            "account_id": "617369586452"
+        },
+        "apj1-spend": {
+            "account_name": "spend",
+            "environment": "apj1",
+            "account_id": "164295797471"
+        },
+        "apj1-front": {
+            "account_name": "front",
+            "environment": "apj1",
+            "account_id": "866971198914"
+        }
+    }
+}

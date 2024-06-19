@@ -1,0 +1,44 @@
+---
+- name: Run whoami
+  win_shell: whoami
+
+- name: Creating C:\Windows\Temp\Ansible
+  win_file:
+    path: C:\\Windows\\Temp\\Ansible
+    state: directory
+
+- name: Create C:\Windows\Temp\Ansible\Media
+  win_file:
+    path: C:\\Windows\\Temp\\Ansible\\Media
+    state: directory
+
+- name: Update permissions on C:\Windows\Temp to allow "Full Control" for all users
+  win_acl:
+    path: C:\\Windows\\Temp
+    user: Everyone
+    rights: FullControl
+    type: allow
+    state: present
+
+- name: Creating C:\Temp\Ansible
+  win_file:
+    path: C:\\Temp\\Ansible
+    state: directory
+
+- name: Install Chocolatey via powershell (avoiding FIPS issue)
+  win_shell: Invoke-Expression ((New-Object Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+
+- name: Set FIPS compliance for chocolatey
+  win_chocolatey_feature:
+    name: useFipsCompliantChecksums
+    state: enabled
+
+- name: Set Chocolatey proxyBypassList
+  win_chocolatey_config:
+    name: proxyBypassList
+    state: present
+    value: localhost
+
+- name: Get current Path
+  win_shell: $ENV:Path
+  register: path_out

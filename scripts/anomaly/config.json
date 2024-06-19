@@ -1,0 +1,45 @@
+ {
+    "taskName": "Log Anomaly",
+    "jobIntervalMins": 10,
+    "threshold": {
+        "0": {
+            "lowerBound": 100,
+            "upperBound": 500,
+            "percentage": 1000
+            },
+        "1": {
+            "lowerBound": 500,
+            "upperBound": 2000,
+            "percentage": 500
+            },
+        "2": {
+            "lowerBound": 2000,
+            "upperBound": 5000,
+            "percentage": 250
+            },
+        "3": {
+            "lowerBound": 5000,
+            "upperBound": 15000,
+            "percentage": 125
+            },
+        "4": {
+            "lowerBound": 15000,
+            "upperBound": 50000,
+            "percentage": 75
+            },
+         "5": {
+            "lowerBound": 50000,
+            "upperBound": 1000000000,
+            "percentage": 50
+            }
+    },
+    "exclude" : ["master", "msdb", "model", "tempdb", "mssqlsystemresource"],
+    "baseSampleFile": "D:\\MSSQL\\anomaly\\BaseSample.json",
+    "splunkDirectory": "D:\\MSSQL\\anomaly\\ToSplunk",
+    "splunkRetentionDays": 1,
+    "scriptDirectory": "D:\\PowershellScripts\\anomaly",
+    "scriptFile": "Run-LogAnomaly.ps1",
+    "s3BucketName": "integration-dbsql-rpl",
+    "s3Key": "anomaly/config.json",
+    "s3UpdateMins": 60
+}

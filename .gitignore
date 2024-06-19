@@ -1,0 +1,19 @@
+**/__pycache__
+**/.pytest_cache
+**/.DS_Store
+**/.vscode
+.DS_Store
+
+## virtualenv
+.venv
+
+## poetry
+dist
+
+nohup.out
+
+.DS_Store
+.DS_Store
+templates/Workstations/test.json
+scripts/SQL2019*.zip
+scripts/SQL202*.zip

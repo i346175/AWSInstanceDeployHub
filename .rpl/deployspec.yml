@@ -1,0 +1,54 @@
+# https://wiki.concur.com/confluence/display/CSS/Deployment+Environments+-+Release+Pipeline
+
+version: 0.2
+env:
+  shell: bash
+  variables:
+    PROXY_URL: "proxy.service.cnqr.tech"
+    PROXY_PORT: "3128"
+phases:
+  install:
+    on-failure: CONTINUE
+    runtime-versions:
+      python: 3.11
+    commands:
+      - chmod -R u+x .rpl/scripts/deployspec/* .rpl/ami/*
+      - env
+      - .rpl/scripts/deployspec/deployspec_initiator.sh "install"
+      - |
+        if [ $? -ne 0 ]; then   
+         exit 1
+        fi
+  pre_build:
+    on-failure: ABORT
+    commands:
+      - .rpl/scripts/deployspec/deployspec_initiator.sh "pre_build"
+      - |
+        if [ $? -ne 0 ]; then   
+         exit 1
+        fi
+  build:
+    on-failure: ABORT
+    commands:
+      - .rpl/scripts/deployspec/deployspec_initiator.sh "build"
+      - |
+        if [ $? -ne 0 ]; then   
+          exit 1
+        fi
+  post_build:
+    on-failure: ABORT
+    commands:
+      - .rpl/scripts/deployspec/deployspec_initiator.sh "post_build" 
+      - |
+        if [ $? -ne 0 ]; then   
+          exit 1
+        fi
+    finally: 
+      - .rpl/scripts/deployspec/deployspec_initiator.sh "finally"
+      - |
+        if [ $? -ne 0 ]; then   
+          exit 1
+        fi
+      
+
+

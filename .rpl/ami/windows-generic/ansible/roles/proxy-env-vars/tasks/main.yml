@@ -1,0 +1,56 @@
+---
+- name: Set http_proxy in System Environment
+  win_environment:
+    state: present
+    name: http_proxy
+    value: "{{ lookup('env', 'IMAGE_FACTORY_HTTP_PROXY') }}"
+    level: machine
+
+- name: Set HTTP_PROXY in System Environment
+  win_environment:
+    state: present
+    name: HTTP_PROXY
+    value: "{{ lookup('env', 'IMAGE_FACTORY_HTTP_PROXY') }}"
+    level: machine
+
+- name: Set https_proxy in System Environment
+  win_environment:
+    state: present
+    name: https_proxy
+    value: "{{ lookup('env', 'IMAGE_FACTORY_HTTPS_PROXY') }}"
+    level: machine
+
+- name: Set HTTPS_PROXY in System Environment
+  win_environment:
+    state: present
+    name: HTTPS_PROXY
+    value: "{{ lookup('env', 'IMAGE_FACTORY_HTTPS_PROXY') }}"
+    level: machine
+
+- name: Set all_proxy in System Environment
+  win_environment:
+    state: present
+    name: all_proxy
+    value: "{{ lookup('env', 'IMAGE_FACTORY_HTTP_PROXY') }}"
+    level: machine
+
+- name: Set ALL_PROXY in System Environment
+  win_environment:
+    state: present
+    name: ALL_PROXY
+    value: "{{ lookup('env', 'IMAGE_FACTORY_HTTP_PROXY') }}"
+    level: machine
+
+- name: Set no_proxy in System Environment
+  win_environment:
+    state: present
+    name: no_proxy
+    value: "127.0.0.1,localhost"
+    level: machine
+
+- name: Set NO_PROXY in System Environment
+  win_environment:
+    state: present
+    name: NO_PROXY
+    value: "127.0.0.1,localhost"
+    level: machine

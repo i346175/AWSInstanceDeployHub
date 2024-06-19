@@ -1,0 +1,373 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Domain-backed WorkStation Template v1.5",
+  
+  "Parameters": {
+    "Environment" : {
+      "Type" : "String",
+      "Default" : "INTEGRATION",
+      "AllowedValues" : ["USPSCC", "INTEGRATION", "US2", "EU2", "APJ1"],
+      "Description" : "Enter Environment. Default is INTEGRATION."
+    },
+    "InstanceTypeParameter" : {
+      "Type" : "String",
+      "Default" : "r5.xlarge",
+      "AllowedValues" : ["r5.xlarge", "r5.2xlarge"],
+      "Description" : "Enter Instance Type. Default is r5.xlarge."
+    },  
+    "Action": {
+      "Description": "Decides if template should be deployed with CloudFormation or just stored at S3 Bucket",
+      "Type": "String",
+      "Default": "Deploy",
+      "AllowedValues": ["S3Bucket","Deploy","ScheduleDeploy","ScheduleDeployTest"]
+    },
+    "Account": {
+      "Description": "Current account",
+      "Type": "String",
+      "Default": "default-account",
+      "AllowedValues": ["default-account","integration-tools", "us2-tools", "eu2-tools", "apj1-tools", "uspscc-tools"]
+    },
+    "BucketName": {
+      "Description": "Bucket Name",
+      "Type": "String",
+      "AllowedPattern": ".+" 
+    },
+    "AZ" : {
+      "Type" : "String",
+      "AllowedValues" : ["zoneA", "zoneB", "zoneC", "zoneD"],
+      "ConstraintDescription" : "Must be a valid availability zone for Environment (APJ1: zoneA, zoneC, zoneD; Others: zoneA, zoneB, zoneC)",
+      "Description" : "Select availability zone for the EC2 Instance (APJ1: zoneA, zoneC or zoneD; Others: zoneA, zoneB or zoneC)"
+    }
+  },
+  "Mappings": {
+    "TemplateParamaters": {
+      "Module": {
+        "ModuleFolderName": "mssql-scripts",
+        "ModuleZipFileName": "mssql-module-",
+        "SSLModuleZipFileName": "TunableSSLValidator.zip",
+        "CACertVaultPath": "https://vault.service.consul/v1/pki/ca/pem",
+        "CACertLocation": "C:\\Program Files\\Amazon\\cfn-bootstrap\\cacert.pem"
+      },
+      "Disk": {
+        "RootDiskSize": "100",
+        "BlockDiskSize":  "1000"
+      }
+    },
+    "UserRole": {
+      "DBA": { "Owner":  "iops-db@sap.com", "Team":  "DBA", "RoleType": "dbawks"}
+    },
+  
+    "VPC": {
+      "INTEGRATION": {
+        "HttpsProxyUrl": "http://proxy.service.cnqr.tech:3128",
+        "DomainSuffix": "integration.system.cnqr.tech",
+        "awsRegion": "us-west-2",
+        "zoneA": "DbSubnet1Id",
+        "zoneB": "DbSubnet2Id",
+        "zoneC": "DbSubnet3Id"
+      },
+      "US2": {
+        "HttpsProxyUrl": "http://proxy.service.cnqr.tech:3128",
+        "DomainSuffix": "us2.system.cnqr.tech",
+        "awsRegion": "us-west-2",
+        "zoneA": "DbSubnet1Id",
+        "zoneB": "DbSubnet2Id",
+        "zoneC": "DbSubnet3Id"
+      },
+      "EU2": {
+        "HttpsProxyUrl": "http://proxy.service.cnqr.tech:3128",
+        "DomainSuffix": "eu2.system.cnqr.tech",
+        "awsRegion": "eu-central-1",
+        "zoneA": "DbSubnet1Id",
+        "zoneB": "DbSubnet2Id",
+        "zoneC": "DbSubnet3Id"
+      },
+      "APJ1": {
+        "HttpsProxyUrl": "http://proxy.service.cnqr.tech:3128",
+        "DomainSuffix": "apj1.system.cnqr.tech",
+        "awsRegion": "ap-northeast-1",
+        "zoneA": "DbSubnet1Id",
+        "zoneC": "DbSubnet2Id",
+        "zoneD": "DbSubnet3Id"
+      },
+      "USPSCC": {
+        "HttpsProxyUrl": "http://proxy.service.cnqr.tech:3128",
+        "DomainSuffix": "uspscc.system.cnqr.tech",
+        "awsRegion": "us-gov-west-1",
+        "zoneA": "DbSubnet1Id",
+        "zoneB": "DbSubnet2Id",
+        "zoneC": "DbSubnet3Id"
+      },
+      "ImageIdParameter": {
+        "271931939120": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}",
+        "957236237862": "{{resolve:ssm:/concur-console-image-factory/impact/dbsqlWIN/PROD}}",
+        "750800039034": "{{resolve:ssm:/concur-console-image-factory/impact/dbsqlWIN/PROD}}",
+        "279778316745": "{{resolve:ssm:/concur-console-image-factory/dba/dbsqlAMI/Win2019}}",
+        "572574059774": "{{resolve:ssm:/concur-console-image-factory/impact/dbsqlWIN/TEST}}"
+      }
+    },
+    "Version": {
+      "Template": {
+        "TemplateVersion": "v2.0"
+      },
+      "Module": {
+        "ModuleVersion": "v87"
+      }
+    }
+  },
+  
+  "Resources": {
+    "WorkStationLaunchTemplate": {
+      "Type" : "AWS::EC2::LaunchTemplate",
+      "Metadata" : {
+        "AWS::CloudFormation::Init": {
+          "configSets" : {
+            "mssql_provisioning":[
+              "configure_Amazon_SSMAgent",
+              "add_hostname_tag",
+              "configure_vault_N_envt_variables",
+              "add_to_domain",
+              "add_tanium_tags",
+              "uninstall_windows_defender",
+              "invoke_storage_config",
+              "schedule_decomission_notification",
+              "install_mgmt_tools"
+            ]
+          },
+          "configure_Amazon_SSMAgent": {
+            "commands": {
+              "0-configure-SSMAgent" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\WKS_configure_Amazon_SSMAgent.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "add_hostname_tag": {
+            "commands": {
+              "0-invoke-addHostNameTag" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\WKS_add_hostname_tag.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "configure_vault_N_envt_variables": {
+            "commands": {
+              "0-invoke-vaultConfigEnvtVariables" :{
+                "command": { "Fn::Sub": [
+                  "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\WKS_configure_vault_N_envt_variables.ps1 -Environment ${p0} -Region ${p1} -s3bucket ${p2}",
+                  {
+                    "p0": {"Ref":  "Environment" },
+                    "p1": { "Ref" : "AWS::Region"},
+                    "p2": {"Ref":  "BucketName" }
+                  }
+                ]},
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "add_to_domain": {
+            "commands": {
+              "0-invoke-addToDomain" :{
+                "command": { "Fn::Sub": [
+                  "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\WKS_add_to_domain.ps1 -S3Bucket ${p0} -DomainSuffice ${p1} -Region ${p2} -StackName {p3}",
+                  {
+                    "p0": { "Ref" : "BucketName" },
+                    "p1": {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "DomainSuffix"]},
+                    "p2": { "Ref" : "AWS::Region" },
+                    "p3": { "Ref" : "AWS::StackName" }
+                  }
+                ]},
+                "waitAfterCompletion" : "forever"
+              }
+            }
+          },
+          "add_tanium_tags":{
+            "commands": {
+              "0-invoke-tanium_tags" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\WKS_add_tanium_tags.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "uninstall_windows_defender":{
+            "commands": {
+              "0-invoke-uninstallWinDefender" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\WKS_uninstall_defender.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "invoke_storage_config": {
+            "commands": {
+              "0-invoke-storageConfig" :{
+                "command": "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\WKS_storage_config.ps1",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "schedule_decomission_notification": {
+            "commands": {
+              "0_add_task_to_task_scheduler" :{
+                "command": "schtasks /create /tn DecomNotifier -sc ONLOGON /rl HIGHEST /tr \"powershell.exe -WindowStyle Hidden -NonInteractive -File C:\\cfn\\temp\\WKS_Schedule_DecomissionNotification.ps1\" /ru BUILTIN\\Users ",
+                "waitAfterCompletion" : "0"
+              }
+            }
+          },
+          "install_mgmt_tools": {
+            "commands": {
+              "0-install-mgmt-tools" :{
+                "command": { "Fn::Sub": [
+                  "powershell.exe -ExecutionPolicy Bypass -NoLogo -NonInteractive -NoProfile -File C:\\cfn\\temp\\WKS_Tools_Install.ps1 -roleType ${p0} -StackName ${p1} -Region ${p2} -Environment ${p3} -Proxy ${p4}",
+                  {
+                    "p0": {"Fn::FindInMap": ["UserRole", "DBA", "RoleType"]},
+                    "p1": { "Ref" : "AWS::StackName" },
+                    "p2": { "Ref" : "AWS::Region"},
+                    "p3": {"Ref":  "Environment" },
+                    "p4": {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "HttpsProxyUrl"]}
+                  }
+                ]},
+                "waitAfterCompletion" : "forever"
+              }
+            }
+          }
+        }
+      },
+      "Properties": {
+        "LaunchTemplateData" : {
+          "TagSpecifications" : [
+            { "ResourceType": "instance",
+              "Tags" : [
+                { "Key" : "Name", "Value": { "Ref": "AWS::StackName" } },
+                { "Key" : "RoleType", "Value" : {"Fn::FindInMap": ["UserRole", "DBA", "RoleType"]} },
+                { "Key" : "Team", "Value" : "DBA" },
+                { "Key" : "Owner", "Value" : "iops-db@sap.com" }
+              ]
+            },
+            {
+              "ResourceType": "volume",
+              "Tags" : [
+                { "Key" : "RoleType", "Value" : {"Fn::FindInMap": ["UserRole", "DBA", "RoleType"]} },
+                { "Key" : "Team", "Value" : "DBA" },
+                { "Key" : "Owner", "Value" : "iops-db@sap.com" }
+              ]
+            }
+          ],
+          "BlockDeviceMappings" : [
+            {
+              "DeviceName" : "/dev/sda1",
+              "Ebs" : {
+                "DeleteOnTermination" : "false",
+                "VolumeType" : "gp3",
+                "VolumeSize": { "Fn::FindInMap" : [ "TemplateParamaters", "Disk" , "RootDiskSize"] },
+                "Encrypted": "true"
+              }
+            },
+            {
+              "DeviceName": "xvdd",
+              "Ebs": {
+                "DeleteOnTermination": "false",
+                "VolumeType" : "gp3",
+                "VolumeSize": "100",
+                "Encrypted": "true"
+              }
+            }
+          ],
+          "NetworkInterfaces" : [{
+            "NetworkInterfaceId": { "Ref" : "MasterNetworkInterface"},
+            "DeviceIndex" : "0"
+          }],
+          "InstanceType" : { "Ref" : "InstanceTypeParameter" },
+          "ImageId": {"Fn::FindInMap" : [ "VPC", "ImageIdParameter", {"Ref":  "AWS::AccountId"}]},
+          "UserData" : {
+            "Fn::Base64" : {
+              "Fn::Join" : ["", [
+                "<powershell>\n",
+                { "Fn::Sub": [
+                  "if( \"${Domain}\" -eq \"INTEGRATION\" ) { \n",
+                  { "Domain":  {"Ref":  "Environment" } }
+                ]},
+                " C:\\Windows\\Temp\\Set-ProxyWindows.ps1 -ProxyServer proxy.service.cnqr.tech:3128 -ProxyServerOverride \"127.0.0.1;*service.consul;*.service.cnqr.tech;*.service.cnqr.io;169.254.169.254;169.254.169.253;169.254.169.251;169.254.169.250;169.254.169.249;169.254.169.123\" \n",
+                "} \n",
+                "(Get-Content C:\\Windows\\Temp\\bootstrap.ps1).replace('Restart-Computer','# Restart-Computer') | Set-Content C:\\Windows\\Temp\\bootstrap.ps1\n",
+                "(Get-Content C:\\Windows\\Temp\\install_agents.ps1).replace('policyid:1686','policyid:1684') | Set-Content C:\\Windows\\Temp\\install_agents.ps1\n", 
+                "C:\\Windows\\Temp\\bootstrap.ps1 \n",
+                "Write-Output 'User Data process started!' \n",
+                "New-Item C:\\cfn\\temp -ItemType Directory | Out-Null \n",
+                "Copy-Item C:\\Windows\\Temp\\accounts.json C:\\cfn\\temp\\accounts.json \n",
+                "$env:https_proxy='' \n",
+                "aws s3 cp s3://",{"Ref":  "BucketName" },"/AWSInstanceDeployHub/scripts/mssql-scripts/CFTemplateScripts/ C:\\cfn\\temp  --recursive --exclude * --include WKS_*.ps1 --no-progress \n",
+                "(Get-Content 'C:\\Windows\\Temp\\proxy_list.ps1').Replace('$pscc_','$uspscc_') | Set-Content C:\\cfn\\temp\\proxy_list.ps1 \n",
+                ". C:\\cfn\\temp\\proxy_list.ps1 \n",
+                { "Fn::Sub": ["$env:no_proxy = $${ENVT}_no_proxy\n",{ "ENVT":  {"Ref":  "Environment" } }]},
+                { "Fn::Sub": ["if( \"${Domain}\" -eq \"INTEGRATION\" ) { \n",{ "Domain":  {"Ref":  "Environment" } }]},
+                { "Fn::Sub": [
+                  " cfn-init.exe -v -c mssql_provisioning -s '${AWS::StackName}' -r 'WorkStationLaunchTemplate' --region '${AWS::Region}' --https-proxy '${HttpsProxyUrl}' \n",
+                  { "HttpsProxyUrl": {"Fn::FindInMap" : [ "VPC", {"Ref":  "Environment" }, "HttpsProxyUrl"]}}
+                ]},
+                "} else { \n",
+                { "Fn::Sub": [
+                  " cfn-init.exe -v -c mssql_provisioning -s '${AWS::StackName}' -r 'WorkStationLaunchTemplate' --region '${AWS::Region}' \n",
+                  { "HttpsProxyUrl": {"Fn::FindInMap" : [ "VPC", { "Ref": "Environment" }, "HttpsProxyUrl"]}}
+                ]},
+                "} \n",
+                "</powershell>\n"
+              ]]
+            }
+          }
+        }
+      }
+    },
+    "ToolsInstallWaitCondition" : {
+      "Type" : "AWS::CloudFormation::WaitCondition",
+      "DependsOn" : ["Master"],
+      "CreationPolicy" : {
+        "ResourceSignal" : {
+          "Timeout" : "PT30M",
+          "Count" : "1"
+        }
+      }
+    },
+    "MasterNetworkInterface": {
+      "Type": "AWS::EC2::NetworkInterface",
+      "Properties": {
+        "GroupSet" : [{"Fn::ImportValue" : "mssqlSG" },{"Fn::ImportValue" : "DefaultSecurityGroupId" }],
+        "SecondaryPrivateIpAddressCount": 0,
+        "SubnetId": {"Fn::ImportValue" : {"Fn::FindInMap" : ["VPC", {"Ref":"Environment"}, {"Ref":"AZ"} ]} },
+        "Tags" : [
+          { "Key" : "RoleType", "Value" : {"Fn::FindInMap": ["UserRole", "DBA", "RoleType"]} },
+          { "Key" : "Team", "Value" : "DBA" },
+          { "Key" : "Owner", "Value" : "iops-db@sap.com" }
+        ]
+      }
+    },
+    "Master": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "IamInstanceProfile": {"Fn::ImportValue" : "MSSQLOpsInstanceProfile"},
+        "NetworkInterfaces" : [{
+          "NetworkInterfaceId": { "Ref" : "MasterNetworkInterface"},
+          "DeviceIndex" : "0"
+        }],
+        "LaunchTemplate": {
+          "LaunchTemplateId": {"Ref":  "WorkStationLaunchTemplate"},
+          "Version": {"Fn::GetAtt": ["WorkStationLaunchTemplate", "LatestVersionNumber"]}
+        }
+      }
+    }
+  },
+  
+  "Outputs": {
+    "Master": {
+      "Value": { "Fn::Join": [", ", [ {"Fn::GetAtt": ["Master", "PrivateDnsName"]} ]]}
+    },
+    "Environment": {
+      "Value": { "Ref": "Environment" }
+    },
+    "TemplateVersion": {
+      "Value": { "Fn::FindInMap" : [ "Version", "Template", "TemplateVersion"] }
+    },
+    "ModuleVersion": {
+      "Value": { "Fn::FindInMap" : [ "Version", "Module", "ModuleVersion"] }
+    }
+  }
+}

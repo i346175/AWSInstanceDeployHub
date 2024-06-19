@@ -1,0 +1,70 @@
+{
+  "concourseTeam": "concourse-dbsqlAMI",
+  "concoursePipeline": "packer-windows",
+
+  "gitOrganization": "impact",
+  "gitRepository": "AWSInstanceDeployHub",
+
+  "imageOrganization": "dba",
+  "imageName": "dbsqlAMI",
+  "imageOwner": "IOPS-DB",
+
+  "imageDescription": "FIPS Golden Image STIG Windows Server 2019",
+  "imageMaintainer": "IOPS-DB <iops-db@sap.com>",
+  "imageVersion": "0.0.1",
+
+  "instanceType": "t3.small",
+
+  "username": "Administrator",
+  "sourceImage": {
+    "filters": {
+      "virtualization-type": "hvm",
+      "name": "cnqr_w2019_stig-*_fips_ga_*",
+      "root-device-type": "ebs"
+    },
+    "owners": [
+      "966799970081"
+    ],
+    "most_recent": true
+  },
+
+  "userDataFile": ".rpl/ami/windows-generic/userdata.txt",
+
+  "provisioner": [
+    {
+      "type": "ansible",
+      "user": "Administrator",
+      "use_proxy": false,
+      "inventory_directory": ".rpl/ami/windows-generic/ansible",
+      "host_alias": "image-factory-ec2",
+      "groups": [
+        "example_group_unencrypted_vars"
+      ],
+      "extra_arguments": [
+        "--extra-vars",
+        "ansible_become_user=Administrator",
+        "--extra-vars",
+        "ansible_password={{.WinRMPassword}} ansible_become_password={{.WinRMPassword}}"
+      ],
+      "playbook_file": ".rpl/ami/windows-generic/ansible/playbook_file.yml"
+    }
+  ],
+
+  "tags": {
+    "RoleType": "dbsql",
+    "GitHubRepository": "impact/AWSInstanceDeployHub",
+    "JiraAlias": "OPI",
+    "JiraComponent": "IOPS-DBA"
+  },
+
+  "localBuild": {
+    "kmsKeyId": "b726eae3-e8ae-4fe2-9b78-1aabd324ad51",
+    "vpcId": "vpc-040f2ea2daa3dab17",
+    "subnetId": "subnet-0dadd355e52abb837",
+    "securityGroupId": "sg-0d26929a1744e4488",
+    "packerOnError": "cleanup",
+    "httpProxy": "http://proxy-us-aws.nonprod.cnqr.tech:3128",
+    "httpsProxy": "http://proxy-us-aws.nonprod.cnqr.tech:3128",
+    "artifactoryURL": "https://artifactory.concur.com"
+  }
+}

@@ -1,0 +1,142 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >
+  Solarwinds DPA RDS MySQL repository version 1.1
+Parameters:
+  Action:
+    Description: "Decides if template should be deployed with CloudFormation or just stored to S3 Bucket"
+    Type: String
+    AllowedValues: 
+      - Deploy
+      
+  Account:
+    Description: "Current account"
+    Type: String
+    AllowedValues:
+      - integration-tools
+      - us2-tools
+      - eu2-tools
+      - uspscc-tools
+      - apj1-tools
+
+  CreateInitialSchema:
+    Description: If true, creates an initial schema with name DBName
+    Default: true
+    Type: String
+    AllowedValues: [true, false]
+  DBName:
+    AllowedPattern: '[a-zA-Z0-9]+'
+    ConstraintDescription: must be between 1 to 16 alphanumeric characters.
+    Description: 'Name of the database'
+    Type: String
+    MaxLength: '16'
+    MinLength: '1'
+    Default: 'solw'
+  DBPort:
+    AllowedPattern: '[0-9]+'
+    ConstraintDescription: must be between only numbers'.
+    Description: The database port number'.
+    Default: '3306'
+    Type: String
+  DBAllocatedStorage:
+    Default: '200'
+    Description: The size of the database (Gb)
+    Type: Number
+    MinValue: '5'
+    MaxValue: '6144'
+    ConstraintDescription: Must be between 5-6144
+  DBInstanceClass:
+    Description: The database instance type
+    Type: String
+    Default: db.m7g.2xlarge
+    AllowedValues:
+      [
+        db.r6g.large,
+        db.r6g.2xlarge,
+        db.r7g.2xlarge,
+        db.r7g.xlarge,
+        db.m7g.2xlarge
+      ]
+  DBInstanceIdentifier:
+    Description: Name for the DB instance
+    Type: String
+  StorageEncrypted:
+    Description: The database is encrypted
+    Default: true
+    Type: String
+    AllowedValues: [true, false]
+  DeletionProtection:
+    Description: The database can't be deleted when deletion protection is enabled
+    Default: true
+    Type: String
+    AllowedValues: [true, false]
+  DbMaxNumberOfConnections:
+    Description: The maximum number of connections allowed to the DB.
+    Type: Number
+    MinValue: '1'
+    MaxValue: '100000'
+    Default: '1500'
+Conditions:
+  StorageEncryptedBoolean:
+    !Equals [true, !Ref StorageEncrypted]
+  DeletionProtectionBoolean:
+    !Equals [true, !Ref DeletionProtection]
+  CreateInitialSchemaBoolean:
+    !Equals [true, !Ref CreateInitialSchema]
+Resources:
+  RDSParamGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Family: MySQL8.0
+      Description: CloudFormation DB Parameter Group
+      Parameters:
+        log_bin_trust_function_creators: '1'
+        tls_version: "TLSv1.2"    # The default allow values are TLSv1, TLSv1.1 and TLSv1.2 but we enforce TLSv1.2 for compliance with Concur standards
+        max_connections: !Ref DbMaxNumberOfConnections
+  DatabaseSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: CloudFormation managed DB subnet group.
+      SubnetIds:
+        - !ImportValue DbSubnet1Id
+        - !ImportValue DbSubnet2Id
+        - !ImportValue DbSubnet3Id
+
+  MasterDB:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      AllocatedStorage: !Ref DBAllocatedStorage
+      AllowMajorVersionUpgrade: true
+      AutoMinorVersionUpgrade: true
+      CopyTagsToSnapshot: true
+      DBInstanceClass: !Ref DBInstanceClass
+      DBInstanceIdentifier:
+        !Join ['-', [!Ref DBInstanceIdentifier, mysql, master]]
+      DBName: !If [CreateInitialSchemaBoolean, !Ref DBName, !Ref "AWS::NoValue"]
+      DBParameterGroupName: !Ref RDSParamGroup
+      DBSubnetGroupName: !Ref DatabaseSubnetGroup
+      DeletionProtection: !If
+        - DeletionProtectionBoolean
+        - true
+        - false
+      Engine: MySQL
+      EngineVersion: '8.0.33'
+      MasterUsername: '{{resolve:secretsmanager:SolarwindsRDS:SecretString:username}}'
+      MasterUserPassword: '{{resolve:secretsmanager:SolarwindsRDS:SecretString:password}}'
+      PubliclyAccessible: false
+      MultiAZ: true
+      Port: !Ref DBPort
+      BackupRetentionPeriod: 0
+      PreferredMaintenanceWindow: 'sat:05:00-sat:08:00'
+      StorageEncrypted: !If
+        - StorageEncryptedBoolean
+        - true
+        - false
+      StorageType: gp3
+      VPCSecurityGroups:
+        - !ImportValue DbSgId
+      Tags:
+        - Key: Name
+          Value: !Join ['-', [!Ref DBName, db, master]]
+
+          

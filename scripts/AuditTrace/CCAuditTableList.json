@@ -1,0 +1,94 @@
+{
+    "Environment": [
+        {
+            "Name" : "ConcurPay",
+            "TableList" : [
+                "BANK_ACCT_DETAIL",
+                "BANK_ACCT_DETAIL_HIST"
+            ]
+        },
+        {
+            "Name" : "Outtask",
+            "TableList" : [
+                "OUTTASK_CREDIT_CARD",
+                "OUTTASK_CREDIT_CARD_HASH",
+                "OUTTASK_VENDOR_VIRTUAL_CREDIT_CARD_MAP",
+                "OUTTASK_CREDIT_CARD_HIST",
+                "CODE_MANIFEST_DEFAULT_CREDIT_CARD_USAGE",
+                "OUTTASK_CREDIT_CARD_TO_ORG_UNIT",
+                "OUTTASK_CREDIT_CARD_HASH",
+                "CREDITCards",
+                "OUTTASK_MEETING_CENTER",
+                "OUTASK_COMPANY_TRAVEL_CONFIG",
+                "OUTTASK_TRAVEL_PNR_VENDOR_FOID",
+                "OUTTASK_TRVEL_AUTOMATED_BILLING"
+            ]
+        },
+        {
+            "Name" : "OuttaskQueue",
+            "TableList" : [ "RUNPROC_MD5" ]
+        },
+        {
+            "Name" : "OuttaskPurged",
+            "TableList" : [
+                "OUTTASK_TICKET_CREDIT_HIST",
+                "ARCHIVE_TEMP_OUTTASK_ATTRIBUTE_VALUES",
+                "CGE_TOKENIZE_CARDS_FOR_USERS",
+                "CGE_TRAVEL_AUTOMATED_BILLING",
+                "OUTTASK_COMPANY_TRAVEL_CONFIG",
+                "OUTTASK_CREDIT_CARD",
+                "OUTTASK_DATA_EXPORT",
+                "OUTTASK_MEETING_CENTER",
+                "OUTASK_COMPANY_TRAVEL_CONFIG",
+                "OUTTASK_TRAVEL_PNR_VENDOR_FOID",
+                "OUTTASK_TRVEL_AUTOMATED_BILLING"
+            ]
+        },
+        {
+            "Name" : "TravelBilling",
+            "TableList" : [ "INVOICE_LINE_ITEMS_DETAILS" ]
+        },
+        {
+            "Name" : "ExpenseSingle-Tenant",
+            "TableList" : [
+                "CT_CREDIT_CARD_ACCOUNT",
+                "Dim_Travel_Ccard_Account",
+                "Hr_CREDIT_Card",
+                "CT_CREDIT_CARD_ACCOUNT"
+            ]
+        },
+        {
+            "Name" : "ExpenseMulti-Tenant",
+            "TableList" : [
+                "CREDIT_CARD_ACCOUNT",
+                "CREDIT_CARD_ACCOUNT_AUDIT",
+                "CC_CREDIT_CARD_SYNC_DETAIL",
+                "CREDIT_CARD_SYNC_DETAIL"
+            ]
+        },
+        {
+            "Name" : "Reporting",
+            "TableList" : [ "Dim_CREDIT_Card_Type" ]
+        },
+        {
+            "Name" : "Compleat",
+            "TableList" : [
+                "WorkItemAdditionalData",
+                "SelfServiceTask",
+                "SettingSecuredDataListValue",
+                "SettingSecuredLookupListValue"
+            ]
+        },
+        {
+            "Name" : "CreditCard",
+            "TableList" : [ "REQUEST" ]
+        },
+        {
+            "Name" : "CT_HOST",
+            "TableList" : [
+                "security_key",
+                "cth_job_encrypt"
+            ]
+        }
+    ]
+}

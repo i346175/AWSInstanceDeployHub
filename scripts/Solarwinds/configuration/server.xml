@@ -1,0 +1,30 @@
+<!--
+
+IMPORTANT NOTES
+
+1. The Server port and Connector port CANNOT be the same port
+2. Do not change these ports unless there is a conflict with another
+   application
+
+-->
+<Server port="8127" shutdown="SHUTDOWN">
+
+  <Service name="Catalina">
+    <Listener className="com.confio.ignite.config.DpaServerLifecycleListener"/>
+
+
+    <!-- Note: AIX requires algorithm="ibmX509" attribute to be present in the connector -->
+    <Connector port="443" maxHttpHeaderSize="20480" URIEncoding="UTF-8" scheme="https" secure="true" SSLEnabled="true"
+               clientAuth="false" useServerCipherSuitesOrder="true" compression="on"
+               compressionMinSize="2048" compressableMimeType="text/html,text/xml,text/csv,text/css,application/javascript"
+                           keystoreType="PKCS12"
+               keystoreFile="conf/.keystore"
+               sslEnabledProtocols="TLSv1.2+TLSv1.3"
+               ciphers="HIGH:!SHA1:!SHA256:!SHA384:!RSA:!DHE"
+    />
+
+    <Engine name="Catalina" defaultHost="localhost">
+      <Host name="localhost" appBase="webapps" />
+    </Engine>
+  </Service>
+</Server>

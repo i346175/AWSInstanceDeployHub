@@ -1,0 +1,41 @@
+---
+- name: Clean up after any Service Packs
+  win_shell: "Dism.exe /online /Cleanup-Image /SPSuperseded > C:\\Temp\\Ansible\\cleanup_servicepack.log"
+  ignore_errors: true
+
+- name: Clean up UserdataExecution.log
+  win_file:
+    path: C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Log\\UserdataExecution.log
+    state: absent
+
+- name: Clean up Ec2Launch.log
+  win_file:
+    path: C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Log\\Ec2Launch.log
+    state: absent
+
+- name: Clean up WallpaperSetup.log
+  win_file:
+    path: C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Log\\WallpaperSetup.log
+    state: absent
+
+- name: Clean up C:\Windows\Temp\Ansible
+  win_file:
+    path: C:\\Windows\\Temp\\Ansible
+    state: absent
+
+# Clear all previously set proxy settings now that software installation is complete
+# Failure to do this means that the SSM agent may not start correctly and can lead to
+# inability for instance to generate a password
+
+- name: Clearing proxy environment variables
+  win_environment:
+    state: absent
+    name: "{{ item }}"
+    level: machine
+  loop:
+    - http_proxy
+    - HTTP_PROXY
+    - https_proxy
+    - HTTPS_PROXY
+    - all_proxy
+    - ALL_PROXY

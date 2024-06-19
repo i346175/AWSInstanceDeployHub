@@ -1,0 +1,35 @@
+#!/usr/bin/expect -f
+set releaseNumber [lindex $argv 0]
+set timeout -1
+set send_slow {1 .1}
+pwd
+cd ./dpa_${releaseNumber}_x64_installer
+spawn ./dpa_${releaseNumber}_x64_installer.sh
+match_max 100000
+ 
+expect -exact ""
+sleep .1
+send -s -- "\r"
+ 
+expect "*--More--*"
+sleep .1
+send -s -- "q"
+ 
+expect -exact "Do you agree with the license? \[y/n\]: "
+sleep .1
+send -s -- "y\r"
+ 
+expect -exact "Press \[enter\] to continue..."
+sleep .1
+send -s -- "\r"
+ 
+expect -exact "Proceed with installation? \[Y/n\]: "
+sleep .1
+send -s -- "y\r"
+ 
+expect -exact "Enter destination directory for DPA"
+sleep .1
+send -s -- "\r"
+expect eof
+ 
+cd ..
